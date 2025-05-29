@@ -541,8 +541,16 @@ class StockHelper extends AbstractHelper
                 return $this->deliverabilityCache[$sku][$sourceCode];
             }
 
-            // Step 1: Check if product has global shipping enabled
-            $product = $this->productRepository->get($sku);
+            // Step 1: Handle the special "NATIONWIDE_SHIPPING" source code
+            if ($sourceCode === 'NATIONWIDE_SHIPPING') {
+                $product = $this->productRepository->get($sku);
+                $hasGlobalShipping = $this->hasGlobalShipping($product);
+                $this->deliverabilityCache[$sku][$sourceCode] = $hasGlobalShipping;
+                return $hasGlobalShipping;
+            }
+
+            // Step 2: For actual sources, check if product has global shipping enabled (products with global shipping are deliverable from any actual source)
+            $product = $this->productRepository->get($sku); // Ensure product is loaded
             $hasGlobalShipping = $this->hasGlobalShipping($product);
 
             if ($hasGlobalShipping) {
@@ -550,17 +558,21 @@ class StockHelper extends AbstractHelper
                 return true;
             }
 
-            // Step 2: Check deliverability status from the madar_product_deliverability table
+            // Step 3: For actual sources and non-global shipping products, check precomputed deliverability status
             $isDeliverable = $this->getDeliverabilityStatus($sku, $sourceCode);
             $this->deliverabilityCache[$sku][$sourceCode] = $isDeliverable;
 
+            return $isDeliverable; // No need for the if/else here
 
-            if ($isDeliverable) {
-                return true;
-            } else {
-                return false;
-            }
+        } catch (NoSuchEntityException $e) {
+            // Product not found, so not deliverable
+            $this->logger->warning("[StockHelper] Product SKU not found: {$sku}");
+            $this->deliverabilityCache[$sku][$sourceCode] = false;
+            return false;
         } catch (\Exception $e) {
+            $this->logger->error("[StockHelper] Error in isProductDeliverable for SKU {$sku}, Source {$sourceCode}: " . $e->getMessage());
+            // Default to false on other errors to be safe
+            $this->deliverabilityCache[$sku][$sourceCode] = false;
             return false;
         }
     }
