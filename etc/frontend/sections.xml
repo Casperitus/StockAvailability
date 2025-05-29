@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Customer:etc/sections.xsd">
+    <action name="stockavailability/branch/update">
+        <section name="delivery-branch"/>
+    </action>
+    <action name="stockavailability/branch/checkCart">
+        <section name="cart-validator"/>
+        <section name="delivery-branch"/>
+    </action>
+    <action name="stockavailability/branch/checkCartPost">
+        <section name="cart-validator"/>
+        <section name="delivery-branch"/>
+    </action>
+</config>

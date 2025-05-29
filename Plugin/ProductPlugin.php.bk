@@ -1,0 +1,79 @@
+<?php
+
+namespace Madar\StockAvailability\Plugin;
+
+use Magento\Catalog\Model\Product;
+use Madar\StockAvailability\Helper\StockHelper;
+use Psr\Log\LoggerInterface;
+use Madar\StockAvailability\Model\Session as CustomerSession;
+
+class ProductPlugin
+{
+    protected $stockHelper;
+    protected $logger;
+    protected $customerSession;
+    protected $validatedSkus = [];
+
+    public function __construct(
+        StockHelper $stockHelper,
+        LoggerInterface $logger,
+        CustomerSession $customerSession
+    ) {
+        $this->stockHelper = $stockHelper;
+        $this->logger = $logger;
+        $this->customerSession = $customerSession;
+    }
+
+    /**
+     * After plugin for isSaleable method.
+     *
+     * @param Product $subject
+     * @param bool $result
+     * @return bool
+     */
+    public function afterIsSaleable(Product $subject, bool $result): bool
+    {
+        if (!$result) {
+            $subject->setData('is_deliverable', false);
+            return false; // Already not saleable, no need to check further
+        }
+
+        $sku = $subject->getSku();
+
+        // Avoid redundant checks for the same SKU
+        if (isset($this->validatedSkus[$sku])) {
+            $deliverable = $this->validatedSkus[$sku];
+            $subject->setData('is_deliverable', $deliverable);
+            $this->logger->info("SKU: $sku | Deliverable: " . ($deliverable ? 'TRUE' : 'FALSE'));
+            return $deliverable;
+        }
+
+        $deliveryBranchData = $this->customerSession->getData();
+        $sourceCode = $deliveryBranchData['selected_source_code'] ?? null;
+
+        if (!$sourceCode) {
+            $this->logger->warning("No source code found in customer session. Assuming deliverable for SKU: $sku.");
+            $this->validatedSkus[$sku] = true;
+            $subject->setData('is_deliverable', true);
+            return true;
+        }
+
+        $this->logger->info("Source Code Found: $sourceCode. Checking deliverability for SKU: $sku.");
+
+        $isDeliverable = $this->stockHelper->isProductDeliverable($sku, $sourceCode);
+
+        if ($isDeliverable) {
+            $this->logger->info("Product SKU: $sku is deliverable via Source: $sourceCode.");
+        } else {
+            $this->logger->info("Product SKU: $sku is NOT deliverable via Source: $sourceCode. Marking as not saleable.");
+        }
+
+        // Cache the result to avoid redundant checks
+        $this->validatedSkus[$sku] = $isDeliverable;
+
+        // Set deliverability status on the product
+        $subject->setData('is_deliverable', $isDeliverable);
+
+        return $isDeliverable;
+    }
+}

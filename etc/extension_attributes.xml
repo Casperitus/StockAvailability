@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:Api/etc/extension_attributes.xsd">
+    <extension_attributes for="Magento\InventoryApi\Api\Data\SourceInterface">
+        <attribute code="delivery_range_km" type="float" />
+        <attribute code="associated_hubs" type="string" />
+        <attribute code="is_hub" type="boolean" />
+    </extension_attributes>
+</config>

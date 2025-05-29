@@ -1,0 +1,112 @@
+<?php
+
+/**
+ * Hyvä Themes - https://hyva.io
+ * Copyright © Hyvä Themes 2020-present. All rights reserved.
+ * This product is licensed per Magento install
+ * See https://hyva.io/license
+ */
+
+declare(strict_types=1);
+
+use Hyva\Theme\Model\ViewModelRegistry;
+use Hyva\Theme\ViewModel\HeroiconsOutline;
+use Hyva\Theme\ViewModel\CurrentProduct;
+use Magento\Catalog\Model\Product;
+use Magento\Framework\Escaper;
+use Magento\Framework\View\Element\Template;
+
+/** @var Template $block */
+/** @var Escaper $escaper */
+/** @var ViewModelRegistry $viewModels */
+/** @var HeroiconsOutline $heroicons */
+$heroicons = $viewModels->require(HeroiconsOutline::class);
+/** @var CurrentProduct $currentProduct */
+$currentProduct = $viewModels->require(CurrentProduct::class);
+
+/** @var Product $product */
+$product = $block->hasData('product')
+    ? $block->getData('product')
+    : $currentProduct->get();
+
+if (!$product || !$product->getId()) {
+    return;
+}
+
+// Determines whether to show "Update item" instead of "Add to Cart"
+$isCartConfigure = (bool) $block->getData('is_cart_configure');
+?>
+
+<div
+    x-data="{
+        sku: '<?= $escaper->escapeJs($product->getSku()) ?>',
+        isCartConfigure: <?= $isCartConfigure ? 'true' : 'false' ?>,
+
+        // True if user has selected a branch/location.
+        get hasLocation() {
+            return Alpine.store('deliverability').selected_source_code
+                ? Alpine.store('deliverability').selected_source_code.length > 0
+                : false;
+        },
+
+        // True if this SKU is deliverable in the chosen branch
+        get isDeliverable() {
+            // 'map[sku]' is 'Yes' or 'No' in your deliverability store
+            return Alpine.store('deliverability').map[this.sku] === 'Yes';
+        },
+
+        init() {
+            // Register the SKU so deliverability data can be fetched
+            DeliverabilityService.registerSku(this.sku);
+        },
+
+        // Final label for the button if the item is deliverable
+        get buttonText() {
+            if (!this.isDeliverable) {
+                return '<?= $escaper->escapeHtml(__('Undeliverable')) ?>';
+            }
+            return this.isCartConfigure
+                ? '<?= $escaper->escapeHtml(__('Update item')) ?>'
+                : '<?= $escaper->escapeHtml(__('Add to Cart')) ?>';
+        }
+    }"
+    class="flex-1 md:w-full md:flex-initial lg:w-auto lg:flex-1">
+
+    <!-- If user has NOT chosen a location, show 'Select Location' button -->
+    <template x-if="!hasLocation">
+        <button
+            type="button"
+            class="btn btn-primary flex items-center gap-2 w-full justify-center"
+            @click="window.toggleDeliveryLocationModal()">
+            <?= $heroicons->locationMarkerHtml('border-current'); ?>
+            <span class="hidden sm:block md:hidden lg:block">
+                <?= $escaper->escapeHtml(__('Select Location')) ?>
+            </span>
+        </button>
+    </template>
+
+    <!-- If user HAS chosen a location, show normal 'Add to Cart / Update item' or 'Unavailable for Delivery' -->
+    <template x-if="hasLocation">
+        <button
+            type="submit"
+            form="product_addtocart_form"
+            :disabled="!isDeliverable"
+            :title="buttonText"
+            class="btn btn-primary flex items-center gap-2 w-full justify-center"
+            id="product-addtocart-button"
+            data-addto="cart">
+            <span class="icon-wrapper">
+                <?= $heroicons->shoppingCartHtml('border-current'); ?>
+            </span>
+
+            <span class="hidden sm:block md:hidden lg:block" x-text="buttonText"></span>
+        </button>
+
+
+    </template>
+
+</div>
+
+<div class="additional-actions mt-2">
+    <?= $block->getChildHtml('', true) ?>
+</div>

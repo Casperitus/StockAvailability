@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<!--
+    app/code/Madar/StockAvailability/etc/frontend/di.xml
+-->
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:ObjectManager/etc/config.xsd">
+
+    <!-- Register the delivery-branch customer data section -->
+    <type name="Magento\Customer\CustomerData\SectionPool">
+        <arguments>
+            <argument name="sectionSourceMap" xsi:type="array">
+                <item name="delivery-branch" xsi:type="string">Madar\StockAvailability\CustomerData\DeliveryBranch</item>
+            </argument>
+        </arguments>
+    </type>
+
+    <!-- Ensure that your Session class is configured correctly -->
+    <type name="Madar\StockAvailability\Model\Session">
+        <arguments>
+            <argument name="name" xsi:type="string">madar_stockavailability</argument>
+        </arguments>
+    </type>
+</config>

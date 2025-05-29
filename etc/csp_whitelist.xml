@@ -1,0 +1,42 @@
+<?xml version="1.0"?>
+<csp_whitelist xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Csp:etc/csp_whitelist.xsd">
+    <policies>
+        <!-- Already existing rules for Google Maps, etc. -->
+
+        <!-- 1) frame-src: allow doubleclick & GTM -->
+        <policy id="frame-src">
+            <values>
+                <!-- Existing entries here if any -->
+
+                <!-- Add DoubleClick -->
+                <value id="doubleclick-frame" type="host">https://td.doubleclick.net</value>
+                <!-- Add Google Tag Manager -->
+                <value id="gtm-frame" type="host">https://www.googletagmanager.com</value>
+            </values>
+        </policy>
+
+        <!-- 2) img-src: allow google.com.sa or wildcard google + doubleclick -->
+        <policy id="img-src">
+            <values>
+                <!-- Existing entries for maps -->
+                <value id="maps-googleapis" type="host">https://maps.googleapis.com</value>
+                <value id="gstatic" type="host">https://*.gstatic.com</value>
+
+                <!-- Add wildcard for google & doubleclick if you want -->
+                <value id="google-img" type="host">https://*.google.com</value>
+                <value id="google-img2" type="host">https://www.google.com.sa</value>
+                <value id="doubleclick-img" type="host">https://*.doubleclick.net</value>
+            </values>
+        </policy>
+
+        <!-- If needed for scripts from GTM or DoubleClick, also add script-src, e.g. -->
+        <policy id="script-src">
+            <values>
+                <!-- existing items plus... -->
+                <value id="gtm-script" type="host">https://www.googletagmanager.com</value>
+                <value id="doubleclick-script" type="host">https://*.doubleclick.net</value>
+            </values>
+        </policy>
+
+    </policies>
+</csp_whitelist>

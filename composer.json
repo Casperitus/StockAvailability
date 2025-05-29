@@ -1,0 +1,22 @@
+{
+    "name": "madar/module-stockavailability",
+    "description": "Stock Availability Extension for Madar Building Materials",
+    "type": "magento2-module",
+    "license": "GPL-3.0",
+    "authors": [
+        {
+            "name": "Wael Eid",
+            "email": "casperitus@gmail.com"
+        }
+    ],
+    "minimum-stability": "dev",
+    "require": {},
+    "autoload": {
+        "files": [
+            "registration.php"
+        ],
+        "psr-4": {
+            "Madar\\StockAvailability\\": ""
+        }
+    }
+}

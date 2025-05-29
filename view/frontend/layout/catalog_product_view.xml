@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<page xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:View/Layout/etc/page_configuration.xsd">
+    <body>
+        <!-- Override stock status template -->
+        <referenceBlock name="product.info.stockstatus">
+            <action method="setTemplate">
+                <argument name="template" xsi:type="string">Madar_StockAvailability::product/view/stock-status.phtml</argument>
+            </action>
+        </referenceBlock>
+
+        <!-- Override grouped options template -->
+        <referenceBlock name="product.info.options.grouped">
+            <action method="setTemplate">
+                <argument name="template" xsi:type="string">Madar_StockAvailability::product/view/type/grouped.phtml</argument>
+            </action>
+        </referenceBlock>
+
+        <!-- Override add to cart template -->
+        <referenceBlock name="product.info.addtocart">
+            <action method="setTemplate">
+                <argument name="template" xsi:type="string">Madar_StockAvailability::product/view/addtocart.phtml</argument>
+            </action>
+        </referenceBlock>
+
+        <referenceContainer name="product.info.options.wrapper">
+            <block class="Magento\Framework\View\Element\Template" name="deliverability.view.model" template="Madar_StockAvailability::deliverability.phtml">
+                <arguments>
+                    <argument name="viewModel" xsi:type="object">Madar\StockAvailability\ViewModel\DeliverabilityViewModel</argument>
+                </arguments>
+            </block>
+        </referenceContainer>
+    </body>
+</page>
+
