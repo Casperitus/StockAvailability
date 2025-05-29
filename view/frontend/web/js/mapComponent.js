@@ -1,6 +1,5 @@
 function mapComponent(_hyvaData) {
-	// Ensure hyvaData is an object, defaulting to an empty one if not.
-	// Version 2.1.0
+	// Robust hyvaData initialization (from newer versions)
 	const hyvaData =
 		_hyvaData && typeof _hyvaData === "object" && !Array.isArray(_hyvaData)
 			? _hyvaData
@@ -12,7 +11,7 @@ function mapComponent(_hyvaData) {
 	const savedAddressesList = Array.isArray(hyvaData.savedAddresses)
 		? hyvaData.savedAddresses
 		: [];
-	const customerData =
+	const initialCustomerSessionData =
 		hyvaData.customerData && typeof hyvaData.customerData === "object"
 			? hyvaData.customerData
 			: {};
@@ -20,8 +19,24 @@ function mapComponent(_hyvaData) {
 		? hyvaData.sourcesData
 		: [];
 
+	// Translatable labels (defaults, should be passed via hyvaData from PHP Block)
+	const labelNationwideShipping =
+		hyvaData.labelNationwideShipping || "Nationwide Shipping";
+	const labelNoLocalBranch =
+		hyvaData.labelNoLocalBranchAlert ||
+		"No local delivery branches serve this area. Nationwide shipping may be available for eligible items.";
+	const labelUnableToFindBranchForAddress =
+		hyvaData.labelUnableToFindBranchForAddressAlert ||
+		"Unable to find a branch within delivery range for the selected address.";
+	const labelSelectValidAddress =
+		hyvaData.labelSelectValidAddress ||
+		"Please select a valid address from the dropdown.";
+	const labelEnterValidAddress =
+		hyvaData.labelEnterValidAddress ||
+		"Please enter and select a valid address.";
+
 	return {
-		// Properties
+		// Properties from newer versions + old version defaults
 		isModalOpen: false,
 		isEditingAddress: false,
 		showSavedAddresses: isLoggedIn && savedAddressesList.length > 0,
@@ -29,8 +44,10 @@ function mapComponent(_hyvaData) {
 		selectedBranchPhone: null,
 		selectedSourceCode: null,
 		currentAddress: "",
-		latitude: parseFloat(hyvaData.defaultLatitude) || 24.7136, // Riyadh latitude
-		longitude: parseFloat(hyvaData.defaultLongitude) || 46.6753, // Riyadh longitude
+		isFetchingDeliveryBranch: false,
+		// Initialize latitude/longitude carefully
+		latitude: parseFloat(hyvaData.defaultLatitude) || 24.7136, // Riyadh default
+		longitude: parseFloat(hyvaData.defaultLongitude) || 46.6753, // Riyadh default
 		googleMapsApiLoaded: false,
 		map: null,
 		marker: null,
@@ -39,47 +56,69 @@ function mapComponent(_hyvaData) {
 		selectedAddress: null,
 		isProcessing: false,
 		isAddressValid: false,
-		lastValidCoordinates: null, // Initialize lastValidCoordinates
+		lastValidCoordinates: null,
 		street: "",
 		city: "",
 		region: "",
 		postcode: "",
 		country: "",
-		_apiKey: hyvaData.apiKey || null,
+
+		_apiKey: hyvaData.apiKey || null, // Crucial for map
 		_isLoggedIn: isLoggedIn,
-		_customerData: customerData,
+		_customerSessionData: initialCustomerSessionData,
 		_sourcesData: sourcesDataList,
 
-		// Initialization
+		// --- Initialization (combining old and new) ---
 		init() {
+			console.log("[MapC_Init] Initializing. Default Lat:", this.latitude);
 			if (!this._apiKey) {
 				console.error(
-					"[MapComponent] Google Maps API key is missing. Map functionality will be disabled."
+					"[MapC_Init] Google Maps API key is missing. Map functionality will be disabled."
 				);
 			}
-			// Initialize lastValidCoordinates from current latitude/longitude if they are valid
+			// Initialize lastValidCoordinates from current latitude/longitude
 			if (!isNaN(this.latitude) && !isNaN(this.longitude)) {
 				this.lastValidCoordinates = { lat: this.latitude, lng: this.longitude };
 			}
 
-			Alpine.store("mapComponentInstance", this);
-			this.fetchDeliveryBranchData();
-			this.setupPrivateContentListener();
-		},
+			Alpine.store("mapComponentInstance", this); // From newer versions
+			this.fetchDeliveryBranchData(); // Fetch initial branch data (common to both)
 
-		// Event Listeners
-		setupPrivateContentListener() {
-			if (!window.hasPrivateContentListener) {
+			// Event listener setup (common pattern)
+			if (!window.mapCompPrivateContentLoaded) {
+				// Use a unique flag
 				window.addEventListener("private-content-loaded", () => {
+					console.log(
+						"[MapC_Event] private-content-loaded received. Re-fetching branch data."
+					);
 					this.fetchDeliveryBranchData();
 				});
-				window.hasPrivateContentListener = true;
+				window.mapCompPrivateContentLoaded = true;
 			}
 		},
 
-		// Data Fetching & Updating
+		// --- Data Fetching & Updating (primarily from newer, refined versions) ---
 		async fetchDeliveryBranchData() {
-			if (this.isProcessing) return;
+			console.log("[MapC_Fetch] Attempting to fetch delivery-branch section."); // Changed log for clarity
+
+			// Check the new specific flag for this function
+			if (this.isFetchingDeliveryBranch) {
+				console.log(
+					"[MapC_Fetch] Already fetching delivery-branch section. New request skipped."
+				);
+				return;
+			}
+			this.isFetchingDeliveryBranch = true; // Set lock for this function
+
+			// The old problematic condition:
+			// if (this.isProcessing && this.isModalOpen) {
+			//     console.log("[MapC_Fetch] Currently processing. Fetch skipped.");
+			//     this.isFetchingDeliveryBranch = false; // Make sure to reset if returning early
+			//     return;
+			// }
+			// This old condition is removed because the component's general 'isProcessing' state
+			// should not block this critical internal refresh step.
+
 			const timestamp = Date.now();
 			const url = `/customer/section/load/?sections=delivery-branch&force_new_section_timestamp=true&_=${timestamp}`;
 			try {
@@ -91,35 +130,69 @@ function mapComponent(_hyvaData) {
 						"X-Requested-With": "XMLHttpRequest",
 					},
 				});
-				if (!response.ok) {
+				if (!response.ok)
 					throw new Error(`HTTP error! status: ${response.status}`);
-				}
+
 				const sectionData = await response.json();
 				const deliveryBranchData = sectionData["delivery-branch"] || {};
 				const customerDataStore = Alpine.store("customerData");
+
 				if (customerDataStore) {
-					customerDataStore.data = { ...sectionData }; // Spread existing and new
-					customerDataStore.data["delivery-branch"] = { ...deliveryBranchData };
+					if (!customerDataStore.data) customerDataStore.data = {};
+					customerDataStore.data = {
+						...customerDataStore.data,
+						...sectionData, // Spread sectionData first
+					};
+					// Ensure 'delivery-branch' is properly updated, creating a new object reference
+					// to help Alpine's reactivity.
+					customerDataStore.data["delivery-branch"] = {
+						...(deliveryBranchData || {}),
+					};
+					console.log(
+						"[MapC_Fetch] Updated Alpine customerData store. delivery-branch source:",
+						customerDataStore.data["delivery-branch"]?.selected_source_code
+					);
 				}
-				this.updateBranchData(deliveryBranchData);
+
+				// Update component's local state directly
+				this.selectedBranchName =
+					deliveryBranchData.selected_branch_name || null;
+				this.selectedBranchPhone =
+					deliveryBranchData.selected_branch_phone || null;
+				this.selectedSourceCode = // <--- This needs to be from the FRESHLY fetched data
+					deliveryBranchData.selected_source_code || null;
+				const newLat = parseFloat(deliveryBranchData.customer_latitude);
+				const newLng = parseFloat(deliveryBranchData.customer_longitude);
+				if (
+					!isNaN(newLat) &&
+					!isNaN(newLng) &&
+					(newLat !== 0 || newLng !== 0)
+				) {
+					this.latitude = newLat;
+					this.longitude = newLng;
+					this.lastValidCoordinates = {
+						lat: this.latitude,
+						lng: this.longitude,
+					};
+				}
+				console.log(
+					`[MapC_Fetch] Component state updated. Current SC: '<span class="math-inline">\{this\.selectedSourceCode\}', Name\: '</span>{this.selectedBranchName}'`
+				);
 			} catch (error) {
-				console.error("Error fetching delivery branch data:", error);
+				console.error(
+					"[MapC_Fetch] Error fetching/processing delivery branch data:",
+					error
+				);
+			} finally {
+				this.isFetchingDeliveryBranch = false; // Release lock for this function
 			}
 		},
 
-		updateBranchData(deliveryBranchData) {
-			this.selectedBranchName = deliveryBranchData.selected_branch_name || null;
-			this.selectedBranchPhone =
-				deliveryBranchData.selected_branch_phone || null;
-			this.selectedSourceCode = deliveryBranchData.selected_source_code || null;
-			const newLat = parseFloat(deliveryBranchData.customer_latitude);
-			const newLng = parseFloat(deliveryBranchData.customer_longitude);
-			if (!isNaN(newLat) && !isNaN(newLng)) {
-				this.updateCoordinates(newLat, newLng); // Use central update function
-			}
-		},
-
-		async updateDeliveryBranchData() {
+		async updateDeliveryBranchDataOnBackend() {
+			console.log(
+				`[MapC_UpdateBackend] POSTing to /branch/update. Component SC='${this.selectedSourceCode}'`
+			);
+			this.isProcessing = true;
 			try {
 				const response = await fetch("/stockavailability/branch/update", {
 					method: "POST",
@@ -138,202 +211,180 @@ function mapComponent(_hyvaData) {
 				});
 				const data = await response.json();
 				if (data.success) {
-					await this.fetchDeliveryBranchData(); // Refresh data after update
+					console.log(
+						"[MapC_UpdateBackend] Success. Re-fetching section data to sync."
+					);
+					await this.fetchDeliveryBranchData(); // This reloads store, which DS watches
 				} else {
 					throw new Error(
-						data.message || "Failed to update delivery branch data"
+						data.message || "Failed to update delivery branch data on backend"
 					);
 				}
 			} catch (error) {
-				console.error("Error updating delivery branch data:", error);
-				throw error; // Re-throw for confirmLocation to catch
+				console.error("[MapC_UpdateBackend] Error:", error);
+				alert("An error occurred updating your location. Please try again.");
+				throw error; // Re-throw so callers like confirmLocation can know
+			} finally {
+				this.isProcessing = false;
 			}
 		},
 
-		// Modal and UI Toggles
+		// --- Modal and UI Toggles (closer to older version's directness + newer flags) ---
 		toggleModal() {
 			this.isModalOpen = !this.isModalOpen;
+			console.log("[MapC_Modal] Toggled. Open:", this.isModalOpen);
 			if (this.isModalOpen) {
 				if (!this._apiKey) {
-					console.warn("[MapComponent] Cannot initialize map without API key.");
+					console.warn("[MapC_Modal] Cannot init map, API key missing.");
 					return;
 				}
 				if (!this.googleMapsApiLoaded) {
+					console.log("[MapC_Modal] Loading Google Maps API...");
 					this.loadGoogleMapsApi();
 				} else {
-					// Ensure map re-initializes or centers correctly if already loaded
-					setTimeout(() => this.initMap(), 100);
+					console.log("[MapC_Modal] API already loaded. Initializing map.");
+					// Use setTimeout to ensure DOM is ready if modal has transitions
+					setTimeout(() => this.initMap(), 50);
 				}
 			}
 		},
 
-		toggleAddressView() {
-			this.showSavedAddresses = !this.showSavedAddresses;
-			this.isEditingAddress = false; // Reset editing state when toggling main view
-			this.clearAddressError();
-			if (!this.showSavedAddresses && this.googleMapsApiLoaded) {
-				// If switching to map view and API is loaded, ensure map is initialized
-				setTimeout(() => this.initMap(), 100);
-			}
-		},
-
-		// Google Maps API and Functionality
+		// --- Google Maps API and Functionality (prioritizing OLDER WORKING PATTERNS) ---
 		loadGoogleMapsApi() {
-			if (!this._apiKey) {
-				console.error("Google Maps API key is missing. Aborting API load.");
-				return;
-			}
+			// Using the global callback pattern from your older working version
+			window.componentInitMap = this.initMap.bind(this); // Bind `this` context
+
 			if (document.querySelector('script[src*="maps.googleapis.com"]')) {
-				this.googleMapsApiLoaded = true;
-				setTimeout(() => this.initMap(), 100); // Ensure initMap is called
+				console.log("[MapC_LoadAPI] Maps script tag already present.");
+				this.googleMapsApiLoaded = true; // Assume loaded
+				if (typeof google !== "undefined" && google.maps) {
+					console.log(
+						"[MapC_LoadAPI] google.maps object found. Initializing map."
+					);
+					window.componentInitMap(); // Call it directly
+				} else {
+					console.warn(
+						"[MapC_LoadAPI] Script tag present, but google.maps not ready. Waiting for callback or manual init."
+					);
+					// The callback in the script URL will eventually call componentInitMap
+				}
 				return;
 			}
-			window.initMapGlobal = () => {
-				const instance = Alpine.store("mapComponentInstance");
-				if (instance) {
-					instance.googleMapsApiLoaded = true;
-					instance.initMap();
-				} else {
-					console.error(
-						"[MapComponent] mapComponentInstance not found in Alpine store for initMapGlobal callback."
-					);
-				}
-			};
+
+			console.log("[MapC_LoadAPI] Creating Google Maps script tag.");
 			const script = document.createElement("script");
-			script.src = `https://maps.googleapis.com/maps/api/js?key=${this._apiKey}&libraries=places&callback=initMapGlobal`;
+			// Using this._apiKey from component state
+			script.src = `https://maps.googleapis.com/maps/api/js?key=${this._apiKey}&libraries=places&callback=componentInitMap`;
 			script.async = true;
 			script.defer = true;
-			script.onerror = () => console.error("Failed to load Google Maps API.");
+			// script.onload from older version was just setting a flag, the callback handles init.
+			// The callback `componentInitMap` will call initMap, which sets googleMapsApiLoaded.
+			script.onerror = () =>
+				console.error("[MapC_LoadAPI] Failed to load Google Maps API script.");
 			document.head.appendChild(script);
 		},
 
 		initMap() {
+			console.log("[MapC_InitMap] Attempting to initialize map.");
 			if (typeof google === "undefined" || typeof google.maps === "undefined") {
 				console.error(
-					"Google Maps API not loaded or 'google.maps' is undefined."
+					"[MapC_InitMap] Google Maps API (google.maps) not available."
 				);
 				return;
 			}
+			// Use x-ref if available, otherwise fallback to ID (from newer version, good robustness)
 			const mapContainer =
-				this.$refs.mapContainer || document.getElementById("amCountrySelector"); // Use x-ref if possible
+				this.$refs.mapContainer || document.getElementById("amCountrySelector");
+
 			if (!mapContainer) {
 				console.error(
-					"Map container (amCountrySelector or x-ref='mapContainer') not found."
+					"[MapC_InitMap] Map container ('mapContainer' x-ref or 'amCountrySelector' ID) not found."
 				);
 				return;
 			}
-			const center = this.getValidCoordinates();
+			if (isNaN(this.latitude) || isNaN(this.longitude)) {
+				console.error(
+					`[MapC_InitMap] Invalid coordinates: Lat=${this.latitude}, Lng=${this.longitude}. Using defaults.`
+				);
+				// Fallback to ensure map loads even if coordinates are bad.
+				this.latitude = 24.7136;
+				this.longitude = 46.6753;
+			}
+
+			const center = { lat: this.latitude, lng: this.longitude };
+			console.log("[MapC_InitMap] Centering map at:", center);
 			const mapOptions = {
 				center: center,
-				zoom: 12,
+				zoom: 12, // Zoom from newer version, 8 was in old
 				mapTypeControl: false,
 				streetViewControl: false,
-				fullscreenControl: false,
+				fullscreenControl: false, // Options from newer
 			};
+
 			try {
 				this.map = new google.maps.Map(mapContainer, mapOptions);
-				this.createMarker(center); // This is where the error occurred
-				this.initAutocomplete();
-				// Only geocode if current address is not set or coordinates are new
-				if (this.isAddressValid && !this.currentAddress) {
+				this.googleMapsApiLoaded = true; // Set flag here upon successful map creation
+				console.log("[MapC_InitMap] Map object created.");
+
+				this.createMarker(center); // createMarker from newer version
+				this.initAutocomplete(); // initAutocomplete from newer version
+
+				// Geocode only if address isn't set and coords are valid (from newer version)
+				// Check this.currentAddress against the value derived from lat/lng
+				// If currentAddress is empty OR geocoding gives a different one, then update it.
+				if (
+					!this.currentAddress &&
+					(this.latitude !== 0 || this.longitude !== 0)
+				) {
 					this.reverseGeocodeAddress();
 				}
 			} catch (e) {
-				console.error("Error initializing Google Map parts:", e);
+				console.error("[MapC_InitMap] Error initializing Google Map parts:", e);
 			}
 		},
 
-		getValidCoordinates() {
-			if (
-				this.lastValidCoordinates &&
-				!isNaN(this.lastValidCoordinates.lat) &&
-				!isNaN(this.lastValidCoordinates.lng)
-			) {
-				return this.lastValidCoordinates;
-			}
-			if (!isNaN(this.latitude) && !isNaN(this.longitude)) {
-				return { lat: this.latitude, lng: this.longitude };
-			}
-			return { lat: 24.7136, lng: 46.6753 }; // Default (Riyadh)
-		},
-
-		createMarker(position) {
-			if (!this.map || typeof google === "undefined" || !google.maps.Marker) {
-				console.error(
-					"[MapComponent] Map or google.maps.Marker not available for createMarker."
-				);
-				return;
-			}
-			if (this.marker) {
-				this.marker.setMap(null); // Remove old marker
-			}
-			this.marker = new google.maps.Marker({
-				position: position,
-				map: this.map,
-				draggable: true,
-				title: "Delivery Location",
-			});
-			this.marker.addListener("dragend", (event) => {
-				const newLat = event.latLng.lat();
-				const newLng = event.latLng.lng();
-				this.updateCoordinates(newLat, newLng);
-				this.reverseGeocodeAddress();
-			});
-		},
-
-		updateCoordinates(lat, lng) {
-			this.latitude = lat;
-			this.longitude = lng;
-			this.lastValidCoordinates = { lat, lng };
-			this.isAddressValid = true; // Assume coordinates from map interaction are valid
-		},
-
+		// Autocomplete from NEWER version (more robust)
 		initAutocomplete() {
 			if (
 				!this.map ||
-				typeof google === "undefined" ||
 				!google.maps.places ||
 				!google.maps.places.Autocomplete
 			) {
-				console.error(
-					"[MapComponent] Autocomplete prerequisites not met (map or google.maps.places.Autocomplete)."
-				);
+				console.error("[MapC_AutoComplete] Prerequisites not met.");
 				return;
 			}
 			const input =
 				this.$refs.addressSearch ||
-				document.getElementById("am-address-search"); // Use x-ref
+				document.getElementById("am-address-search");
 			if (!input) {
-				console.error(
-					"Address search input (am-address-search or x-ref='addressSearch') not found."
-				);
+				console.error("[MapC_AutoComplete] Address search input not found.");
 				return;
 			}
+
 			this.autocomplete = new google.maps.places.Autocomplete(input, {
-				componentRestrictions: { country: "sa" }, // Restrict to Saudi Arabia
+				componentRestrictions: { country: "sa" },
 				fields: ["address_components", "formatted_address", "geometry", "name"],
 			});
 			this.autocomplete.bindTo("bounds", this.map);
 			this.autocomplete.addListener("place_changed", () => {
 				const place = this.autocomplete.getPlace();
 				if (!place.geometry || !place.geometry.location) {
-					this.showAddressError(
-						"Please select a valid address from the dropdown."
-					);
+					this.showAddressError(labelSelectValidAddress); // Use label
 					this.isAddressValid = false;
 					return;
 				}
 				const location = place.geometry.location;
-				this.updateCoordinates(location.lat(), location.lng());
+				this.updateCoordinates(location.lat(), location.lng()); // Central update
 				this.map.setCenter(location);
 				if (this.marker) this.marker.setPosition(location);
 				else this.createMarker(location);
 				this.currentAddress = place.formatted_address;
-				input.value = this.currentAddress; // Ensure input field reflects selection
+				input.value = this.currentAddress;
 				this.clearAddressError();
 				this.parseAddressComponents(place.address_components);
-				this.isAddressValid = true; // Address selected from autocomplete is valid
+				this.isAddressValid = true;
 			});
+			// Blur/Enter listeners from newer version
 			input.addEventListener("blur", () =>
 				this.validateManualInput(input.value)
 			);
@@ -345,122 +396,15 @@ function mapComponent(_hyvaData) {
 			});
 		},
 
-		validateManualInput(inputValue) {
-			const currentInputValue = (inputValue || "").trim();
-			if (currentInputValue === "" && this.currentAddress === "") {
-				// Both empty, nothing to validate
-				this.clearAddressError();
-				this.isAddressValid = false; // No address entered
-				return;
-			}
-			if (currentInputValue !== this.currentAddress) {
-				this.showAddressError(
-					"Please select an address from the dropdown suggestions."
-				);
-				this.isAddressValid = false;
-			} else if (
-				currentInputValue === this.currentAddress &&
-				this.currentAddress !== ""
-			) {
-				this.clearAddressError();
-				this.isAddressValid = true;
-			}
-		},
-
-		showAddressError(message) {
-			const input =
-				this.$refs.addressSearch ||
-				document.getElementById("am-address-search");
-			this.clearAddressError(); // Clear previous before showing new
-			if (input) {
-				input.classList.add("border-red-500", "bg-red-50"); // Use Tailwind classes
-				input.classList.remove("focus:ring-primary", "focus:border-primary");
-			}
-			const errorDiv = document.createElement("div");
-			errorDiv.className = "text-red-600 text-xs mt-1"; // Tailwind classes for error
-			errorDiv.textContent = message;
-			errorDiv.id = "address-error-message"; // Consistent ID
-			input?.parentNode?.insertBefore(errorDiv, input.nextSibling);
-		},
-
-		clearAddressError() {
-			const input =
-				this.$refs.addressSearch ||
-				document.getElementById("am-address-search");
-			const errorDiv = document.getElementById("address-error-message");
-			if (input) {
-				input.classList.remove("border-red-500", "bg-red-50");
-				input.classList.add("focus:ring-primary", "focus:border-primary");
-			}
-			errorDiv?.remove();
-		},
-
-		parseAddressComponents(components) {
-			const componentMap = {
-				street_number: "",
-				route: "",
-				sublocality: "",
-				locality: "",
-				administrative_area_level_1: "",
-				postal_code: "",
-				country: "",
-			};
-			components.forEach((component) => {
-				const type = component.types[0];
-				if (componentMap.hasOwnProperty(type))
-					componentMap[type] = component.long_name;
-				if (type === "country") componentMap.country = component.short_name; // Ensure country uses short_name
-			});
-			this.street = [
-				componentMap.street_number,
-				componentMap.route,
-				componentMap.sublocality,
-			]
-				.filter(Boolean)
-				.join(", ");
-			this.city = componentMap.locality;
-			this.region = componentMap.administrative_area_level_1;
-			this.postcode = componentMap.postal_code;
-			this.country = componentMap.country || "SA"; // Default to SA
-		},
-
-		useCurrentLocation() {
-			if (!navigator.geolocation) {
-				alert("Geolocation is not supported by this browser.");
-				return;
-			}
-			this.isProcessing = true; // Indicate processing
-			navigator.geolocation.getCurrentPosition(
-				(position) => {
-					const lat = position.coords.latitude;
-					const lng = position.coords.longitude;
-					this.updateCoordinates(lat, lng);
-					if (this.map) {
-						// Check if map is initialized
-						const newCenter = { lat, lng };
-						this.map.setCenter(newCenter);
-						if (this.marker) this.marker.setPosition(newCenter);
-						else this.createMarker(newCenter);
-						this.reverseGeocodeAddress();
-					}
-					this.isProcessing = false;
-				},
-				(error) => {
-					console.error("Error getting current location:", error);
-					alert("Unable to retrieve your location. Error: " + error.message);
-					this.isProcessing = false;
-				},
-				{ enableHighAccuracy: true, timeout: 10000, maximumAge: 300000 }
-			);
-		},
-
+		// Geocoding from NEWER version (updates component state)
 		reverseGeocodeAddress() {
-			if (!this.map || typeof google === "undefined" || !google.maps.Geocoder) {
-				console.error("[MapComponent] Geocoder prerequisites not met.");
+			if (!this.map || !google.maps.Geocoder) {
+				console.error("[MapC_ReverseGeo] Geocoder missing.");
 				return;
 			}
 			const geocoder = new google.maps.Geocoder();
 			const latlng = { lat: this.latitude, lng: this.longitude };
+			// console.log("[MapC_ReverseGeo] Geocoding for:", latlng);
 			geocoder.geocode({ location: latlng }, (results, status) => {
 				if (status === "OK" && results && results[0]) {
 					this.currentAddress = results[0].formatted_address;
@@ -469,36 +413,46 @@ function mapComponent(_hyvaData) {
 						document.getElementById("am-address-search");
 					if (input) input.value = this.currentAddress;
 					this.parseAddressComponents(results[0].address_components);
-					this.isAddressValid = true;
+					this.isAddressValid = true; // Address from geocoding is valid
 					this.clearAddressError();
+					// console.log("[MapC_ReverseGeo] Success:", this.currentAddress);
 				} else {
-					console.error("Geocode was not successful: " + status);
-					// this.showAddressError("Could not determine address for this location.");
+					console.error("[MapC_ReverseGeo] Geocode failed:", status);
 					this.isAddressValid = false; // Geocoding failed
 				}
 			});
 		},
 
-		// Main Actions
+		// --- Location Confirmation & Branch Logic (from NEWER, refined versions) ---
 		async confirmLocation() {
-			if (this.isProcessing) return;
-			this.clearAddressError();
-			const input =
-				this.$refs.addressSearch ||
-				document.getElementById("am-address-search");
-			const inputValue = input ? input.value.trim() : "";
-
-			this.validateManualInput(inputValue); // Explicitly validate before proceeding
-			if (!this.isAddressValid) {
-				// Check validation status
-				if (!document.getElementById("address-error-message")) {
-					// Show generic error if specific one isn't there
-					this.showAddressError("Please enter and select a valid address.");
-				}
+			console.log(
+				`[MapC_Confirm] Attempting for Lat: ${this.latitude}, Lng: ${this.longitude}`
+			);
+			if (this.isProcessing) {
+				console.log("[MapC_Confirm] Already processing.");
 				return;
 			}
 
+			const input =
+				this.$refs.addressSearch ||
+				document.getElementById("am-address-search");
+			this.validateManualInput(
+				input ? input.value.trim() : this.currentAddress
+			);
+			if (!this.isAddressValid) {
+				if (
+					!document.getElementById("address-error-message") &&
+					this.currentAddress
+				) {
+					// Only show error if address was attempted
+					this.showAddressError(labelEnterValidAddress); // Use label
+				}
+				console.log("[MapC_Confirm] Address not valid.");
+				return;
+			}
+			this.clearAddressError();
 			this.isProcessing = true;
+
 			try {
 				const nearestBranch = this.findNearestBranch(
 					this.latitude,
@@ -506,54 +460,101 @@ function mapComponent(_hyvaData) {
 					this._sourcesData
 				);
 				if (!nearestBranch) {
-					// No local branch found, set to a nationwide/global shipping fallback
-					// First, alert the user with a more informative message.
-					// This message should ideally be translatable or come from hyvaData if possible.
-					alert(
-						"No local delivery branches serve this precise location. You can still order items available for nationwide shipping. For local delivery options, please select a location within our branch service areas."
-					);
-
-					this.selectedSourceCode = "NATIONWIDE_SHIPPING"; // Special code for global/nationwide
-					this.selectedBranchName = "Nationwide Shipping"; // This should be a translatable string (see Part 3)
-					this.selectedBranchPhone = null; // Or a general customer service number
-
-					// We still need to update the backend about this "choice"
-					// The saveAddressToServer might not be relevant if it's not a specific branch address,
-					// but updating the delivery branch data (which updates the session) is.
+					alert(labelNoLocalBranch); // Using the pre-defined label
+					this.selectedSourceCode = "NATIONWIDE_SHIPPING";
+					this.selectedBranchName = labelNationwideShipping; // Using the pre-defined label
+					this.selectedBranchPhone = null;
 				} else {
-					// A local branch was found
 					this.selectedBranchName = nearestBranch.source_name;
 					this.selectedBranchPhone = nearestBranch.phone;
 					this.selectedSourceCode = nearestBranch.source_code;
 				}
+				console.log(
+					`[MapC_Confirm] Branch choice: SC='${this.selectedSourceCode}', Name='${this.selectedBranchName}'.`
+				);
 
-				// Proceed with saving/updating data regardless of whether it's a local branch or nationwide
-				// The saveAddressToServer() call is tied to saving the customer's address,
-				// which might still be relevant if they confirmed a new address on the map.
-				// If it's only for local branch context, you might conditionally call it:
-				// if (this._isLoggedIn && nearestBranch) { // Only save if it's a real branch context
 				if (this._isLoggedIn) {
-					// Or save address anyway if user is logged in and confirmed a location
 					try {
 						await this.saveAddressToServer();
-					} catch (error) {
-						// Handle error from saveAddressToServer if needed,
-						// but don't let it block setting the nationwide shipping context.
-						console.error("Error saving address to server:", error);
-						// Decide if you want to alert the user or proceed with nationwide context.
-						// For now, we'll let it proceed to updateDeliveryBranchData.
+					} catch (e) {
+						console.warn(
+							"[MapC_Confirm] Error saving address (non-critical):",
+							e
+						);
 					}
 				}
-				await this.updateDeliveryBranchData(); // Update session with selected_source_code etc.
-				this.isModalOpen = false; // Close modal in both cases
+				await this.updateDeliveryBranchDataOnBackend(); // This will POST, then GET, then update store
+				this.isModalOpen = false;
 			} catch (error) {
-				console.error("Error confirming location:", error);
-				alert("An error occurred. Please try again.");
+				// Error is usually alerted in updateDeliveryBranchDataOnBackend if it's from there
+				console.error("[MapC_Confirm] Error in confirm process:", error);
 			} finally {
 				this.isProcessing = false;
 			}
 		},
 
+		selectAddress(address) {
+			console.log("[MapC_SelectAddr] Saved address selected:", address.details);
+			if (
+				!address ||
+				typeof address.latitude === "undefined" ||
+				typeof address.longitude === "undefined"
+			) {
+				alert("Selected address has invalid coordinates.");
+				return;
+			}
+			this.isProcessing = true;
+
+			this.selectedAddress = address;
+			this.updateCoordinates(
+				parseFloat(address.latitude),
+				parseFloat(address.longitude)
+			);
+			this.currentAddress =
+				address.details || `${address.street}, ${address.city}`;
+			this.street = address.street || "";
+			this.city = address.city || "";
+			this.region = address.region || "";
+			this.postcode = address.postcode || "";
+			this.country = address.country_id || "SA";
+			this.isAddressValid = true;
+			this.clearAddressError();
+
+			const nearestBranch = this.findNearestBranch(
+				this.latitude,
+				this.longitude,
+				this._sourcesData
+			);
+			if (!nearestBranch) {
+				alert(labelUnableToFindBranchForAddress); // Use pre-defined label
+				this.selectedSourceCode = "NATIONWIDE_SHIPPING";
+				this.selectedBranchName = labelNationwideShipping; // Use pre-defined label
+				this.selectedBranchPhone = null;
+			} else {
+				this.selectedBranchName = nearestBranch.source_name;
+				this.selectedBranchPhone = nearestBranch.phone;
+				this.selectedSourceCode = nearestBranch.source_code;
+			}
+			console.log(
+				`[MapC_SelectAddr] Branch choice: SC='${this.selectedSourceCode}', Name='${this.selectedBranchName}'.`
+			);
+
+			this.updateDeliveryBranchDataOnBackend()
+				.then(() => {
+					this.isModalOpen = false;
+				})
+				.catch((error) =>
+					console.error(
+						"[MapC_SelectAddr] Error post-selecting address:",
+						error
+					)
+				)
+				.finally(() => {
+					this.isProcessing = false;
+				});
+		},
+
+		// --- Helper methods (merged from old and new) ---
 		findNearestBranch(lat, lng, sourcesData) {
 			if (!sourcesData || sourcesData.length === 0) return null;
 			let nearestBranch = null;
@@ -575,86 +576,199 @@ function mapComponent(_hyvaData) {
 			});
 			return nearestBranch;
 		},
-
 		calculateDistance(lat1, lng1, lat2, lng2) {
-			const earthRadius = 6371; // km
-			const dLat = this.degreesToRadians(lat2 - lat1);
-			const dLng = this.degreesToRadians(lng2 - lng1);
+			const R = 6371;
+			const φ1 = (lat1 * Math.PI) / 180,
+				φ2 = (lat2 * Math.PI) / 180,
+				Δφ = ((lat2 - lat1) * Math.PI) / 180,
+				Δλ = ((lng2 - lng1) * Math.PI) / 180;
 			const a =
-				Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-				Math.cos(this.degreesToRadians(lat1)) *
-					Math.cos(this.degreesToRadians(lat2)) *
-					Math.sin(dLng / 2) *
-					Math.sin(dLng / 2);
+				Math.sin(Δφ / 2) ** 2 +
+				Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
 			const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-			return earthRadius * c;
+			return R * c;
 		},
-
 		degreesToRadians(degrees) {
 			return degrees * (Math.PI / 180);
 		},
-
-		async saveAddressToServer() {
-			if (!this.street || !this.city || !this.country) {
-				// Added country check
-				console.error("Address information incomplete for saving:", {
-					street: this.street,
-					city: this.city,
-					country: this.country,
-				});
-				throw new Error("Address information is incomplete for saving.");
+		updateCoordinates(lat, lng) {
+			this.latitude = lat;
+			this.longitude = lng;
+			this.lastValidCoordinates = { lat, lng };
+			this.isAddressValid = true;
+		}, // From newer
+		parseAddressComponents(components) {
+			/* ... from newer version, already included above ... */ const map = {
+				street_number: "",
+				route: "",
+				sublocality: "",
+				locality: "",
+				administrative_area_level_1: "",
+				postal_code: "",
+				country: "",
+			};
+			components.forEach((c) => {
+				const t = c.types[0];
+				if (map.hasOwnProperty(t)) map[t] = c.long_name;
+				if (t === "country") map.country = c.short_name;
+			});
+			this.street = [map.street_number, map.route, map.sublocality]
+				.filter(Boolean)
+				.join(", ");
+			this.city = map.locality;
+			this.region = map.administrative_area_level_1;
+			this.postcode = map.postal_code;
+			this.country = map.country || "SA";
+		},
+		validateManualInput(val) {
+			/* ... from newer, already included above ... */ const v = (
+				val || ""
+			).trim();
+			if (v === "" && this.currentAddress === "") {
+				this.clearAddressError();
+				this.isAddressValid = false;
+				return;
 			}
-			const addressData = {
+			if (v !== this.currentAddress) {
+				this.showAddressError(
+					hyvaData.labelSelectValidAddress || "Select from suggestions."
+				);
+				this.isAddressValid = false;
+			} else if (v === this.currentAddress && this.currentAddress !== "") {
+				this.clearAddressError();
+				this.isAddressValid = true;
+			}
+		},
+		showAddressError(msg) {
+			/* ... from newer, already included above ... */ const i =
+				this.$refs.addressSearch ||
+				document.getElementById("am-address-search");
+			this.clearAddressError();
+			if (i) {
+				i.classList.add("border-red-500", "bg-red-50");
+				i.classList.remove("focus:ring-primary", "focus:border-primary");
+			}
+			const d = document.createElement("div");
+			d.className = "text-red-600 text-xs mt-1";
+			d.textContent = msg;
+			d.id = "address-error-message";
+			i?.parentNode?.insertBefore(d, i.nextSibling);
+		},
+		clearAddressError() {
+			/* ... from newer, already included above ... */ const i =
+				this.$refs.addressSearch ||
+				document.getElementById("am-address-search");
+			const d = document.getElementById("address-error-message");
+			if (i) {
+				i.classList.remove("border-red-500", "bg-red-50");
+				i.classList.add("focus:ring-primary", "focus:border-primary");
+			}
+			d?.remove();
+		},
+		saveAddressToServer() {
+			/* ... from newer, already included above ... */ if (
+				!this.street ||
+				!this.city ||
+				!this.country
+			)
+				throw new Error("Addr incomplete");
+			const ad = {
 				address_id: this.selectedAddress?.id || null,
-				firstname: this._customerData.firstname || "Customer",
-				lastname: this._customerData.lastname || "User",
-				telephone: this._customerData.telephone || "0000000000", // Ensure this is available or default
-				street: [this.street], // Magento expects street as an array
+				firstname: this._customerSessionData.firstname || "Cust",
+				lastname: this._customerSessionData.lastname || "User",
+				telephone: this._customerSessionData.telephone || "000",
+				street: [this.street],
 				city: this.city,
-				postcode: this.postcode || "00000", // Default postcode
-				country_id: this.country, // Ensure this is a valid country code
-				region: this.region || "", // Region can be string or object, ensure it's string for simple save
+				postcode: this.postcode || "00000",
+				country_id: this.country,
+				region: this.region || "",
 				latitude: this.latitude,
 				longitude: this.longitude,
 				is_default_shipping:
 					this.savedAddresses.length === 0 ||
 					(this.selectedAddress
 						? this.selectedAddress.is_default_shipping
-						: true), // Smart default
+						: true),
 				is_default_billing:
 					this.savedAddresses.length === 0 ||
 					(this.selectedAddress
 						? this.selectedAddress.is_default_billing
 						: false),
 			};
-			try {
-				const response = await fetch("/stockavailability/address/save", {
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-						"X-Requested-With": "XMLHttpRequest",
-					},
-					body: JSON.stringify(addressData),
-					credentials: "same-origin",
+			return fetch("/stockavailability/address/save", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					"X-Requested-With": "XMLHttpRequest",
+				},
+				body: JSON.stringify(ad),
+				credentials: "same-origin",
+			})
+				.then((r) => r.json())
+				.then((d) => {
+					if (!d.success)
+						throw new Error(d.message || "Failed to save address");
+					return d;
 				});
-				const data = await response.json();
-				if (!data.success) {
-					throw new Error(data.message || "Failed to save address");
-				}
-				// Optionally refresh saved addresses here if the save endpoint doesn't trigger section reload
-				// await this.fetchDeliveryBranchData(); // Or a more specific saved address fetch
-				return data;
-			} catch (error) {
-				console.error("Error saving address to server:", error);
-				throw error;
-			}
 		},
-
-		selectAddress(address) {
-			if (
+		createMarker(position) {
+			/* ... from newer, already included above ... */ if (
+				!this.map ||
+				typeof google === "undefined" ||
+				!google.maps.Marker
+			)
+				return;
+			if (this.marker) this.marker.setMap(null);
+			this.marker = new google.maps.Marker({
+				position,
+				map: this.map,
+				draggable: true,
+				title: "Delivery Location",
+			});
+			this.marker.addListener("dragend", (e) => {
+				this.updateCoordinates(e.latLng.lat(), e.latLng.lng());
+				this.reverseGeocodeAddress();
+			});
+		},
+		useCurrentLocation() {
+			/* ... from newer, already included above ... */ if (
+				!navigator.geolocation
+			) {
+				alert("Geo not supported.");
+				return;
+			}
+			this.isProcessing = true;
+			navigator.geolocation.getCurrentPosition(
+				(p) => {
+					this.updateCoordinates(p.coords.latitude, p.coords.longitude);
+					if (this.map) {
+						const nc = { lat: this.latitude, lng: this.longitude };
+						this.map.setCenter(nc);
+						if (this.marker) this.marker.setPosition(nc);
+						else this.createMarker(nc);
+						this.reverseGeocodeAddress();
+					}
+					this.isProcessing = false;
+				},
+				(e) => {
+					console.error(e);
+					this.isProcessing = false;
+				},
+				{ enableHighAccuracy: true }
+			);
+		},
+		toggleAddressView() {
+			/* ... from newer, already included above ... */ this.showSavedAddresses =
+				!this.showSavedAddresses;
+			this.isEditingAddress = false;
+			this.clearAddressError();
+			if (!this.showSavedAddresses && this.googleMapsApiLoaded)
+				setTimeout(() => this.initMap(), 100);
+		},
+		editAddress(address) {
+			/* ... from newer, already included above ... */ if (
 				address &&
-				typeof address.latitude !== "undefined" &&
-				typeof address.longitude !== "undefined"
+				typeof address.latitude !== "undefined"
 			) {
 				this.selectedAddress = address;
 				this.updateCoordinates(
@@ -662,94 +776,32 @@ function mapComponent(_hyvaData) {
 					parseFloat(address.longitude)
 				);
 				this.currentAddress =
-					address.details || `${address.street}, ${address.city}`; // Fallback for details
+					address.details || `${address.street}, ${address.city}`;
 				this.street = address.street || "";
 				this.city = address.city || "";
 				this.region = address.region || "";
 				this.postcode = address.postcode || "";
 				this.country = address.country_id || "SA";
-				this.isAddressValid = true; // Saved address is considered valid
-				this.clearAddressError();
-
-				const nearestBranch = this.findNearestBranch(
-					this.latitude,
-					this.longitude,
-					this._sourcesData
-				);
-				if (!nearestBranch) {
-					alert(
-						"Unable to find a branch within delivery range for the selected address."
-					);
-					return; // Don't close modal or proceed
-				}
-				this.selectedBranchName = nearestBranch.source_name;
-				this.selectedBranchPhone = nearestBranch.phone;
-				this.selectedSourceCode = nearestBranch.source_code;
-
-				this.isProcessing = true; // Show processing
-				this.updateDeliveryBranchData()
-					.then(() => {
-						this.isModalOpen = false;
-					})
-					.catch((error) =>
-						console.error("Error updating branch data on selectAddress:", error)
-					)
-					.finally(() => {
-						this.isProcessing = false;
-					});
-			} else {
-				alert("Selected address has invalid or missing coordinates.");
-			}
-		},
-
-		editAddress(address) {
-			if (
-				address &&
-				typeof address.latitude !== "undefined" &&
-				typeof address.longitude !== "undefined"
-			) {
-				this.selectedAddress = address; // Keep track of which address is being edited for save
-				this.updateCoordinates(
-					parseFloat(address.latitude),
-					parseFloat(address.longitude)
-				);
-				this.currentAddress =
-					address.details || `${address.street}, ${address.city}`; // Populate search/display
-				// Populate individual fields for potential direct form editing (if UI allows)
-				this.street = address.street || "";
-				this.city = address.city || "";
-				this.region = address.region || "";
-				this.postcode = address.postcode || "";
-				this.country = address.country_id || "SA";
-
 				this.isEditingAddress = true;
-				this.showSavedAddresses = false; // Switch to map/search view
-				this.isAddressValid = true; // Start as valid since it's an existing address
-
-				// Ensure map is ready for the coordinates
-				if (!this.googleMapsApiLoaded && this._apiKey) {
-					this.loadGoogleMapsApi(); // This will call initMap on load
-				} else if (this.googleMapsApiLoaded) {
+				this.showSavedAddresses = false;
+				this.isAddressValid = true;
+				if (!this.googleMapsApiLoaded && this._apiKey) this.loadGoogleMapsApi();
+				else if (this.googleMapsApiLoaded)
 					setTimeout(() => {
-						if (!this.map) this.initMap(); // If map isn't there, init
+						if (!this.map) this.initMap();
 						else {
-							// Map exists, just update center and marker
-							const position = { lat: this.latitude, lng: this.longitude };
-							this.map.setCenter(position);
-							if (this.marker) this.marker.setPosition(position);
-							else this.createMarker(position);
+							const p = { lat: this.latitude, lng: this.longitude };
+							this.map.setCenter(p);
+							if (this.marker) this.marker.setPosition(p);
+							else this.createMarker(p);
 						}
-						// Ensure search input reflects current address
-						const input =
+						const i =
 							this.$refs.addressSearch ||
 							document.getElementById("am-address-search");
-						if (input) input.value = this.currentAddress;
+						if (i) i.value = this.currentAddress;
 					}, 150);
-				}
 			} else {
-				alert(
-					"Selected address has invalid or missing coordinates for editing."
-				);
+				alert("Addr invalid for edit.");
 			}
 		},
 	};
@@ -759,16 +811,12 @@ document.addEventListener("alpine:init", () => {
 	if (!Alpine.store("customerData")) {
 		Alpine.store("customerData", {
 			data: {},
-			get(key) {
-				return this.data[key];
-			},
-			set(key, value) {
-				this.data[key] = value;
-			},
+			// Removed explicit get/set from older version as Alpine handles reactivity on .data directly
 		});
 	}
 	Alpine.data("mapComponent", mapComponent);
 	window.toggleDeliveryLocationModal = () => {
+		// Global helper from newer versions
 		const instance = Alpine.store("mapComponentInstance");
 		if (instance) {
 			instance.toggleModal();
