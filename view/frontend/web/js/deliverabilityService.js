@@ -51,9 +51,7 @@
 		const initialSource =
 			Alpine.store("customerData")?.data?.["delivery-branch"]
 				?.selected_source_code || "";
-		console.log(
-			`[DService_Init] Initial source from customerData: '${initialSource}'`
-		);
+
 		processSourceCodeChange(initialSource); // Process initial state
 	}
 
@@ -62,16 +60,10 @@
 			const currentGlobalSourceCode =
 				Alpine.store("customerData")?.data?.["delivery-branch"]
 					?.selected_source_code || "";
-			console.log(
-				`[DService_EFFECT] Watcher sees source in customerData: '${currentGlobalSourceCode}'`
-			);
 
 			if (effectDebounceTimeout) clearTimeout(effectDebounceTimeout);
 
 			effectDebounceTimeout = setTimeout(() => {
-				console.log(
-					`[DService_EFFECT] Debounce done. Processing source: '${currentGlobalSourceCode}'`
-				);
 				processSourceCodeChange(currentGlobalSourceCode);
 			}, DEBOUNCE_DELAY);
 		});
@@ -79,9 +71,6 @@
 
 	// Central logic to handle a source code change
 	function processSourceCodeChange(currentSourceCode) {
-		console.log(
-			`[DService_PROCESS] Attempting. Proposed: '${currentSourceCode}', Previous processed: '${previousSourceCode}'`
-		);
 		const store = Alpine.store("deliverability");
 
 		if (!store) {
@@ -93,42 +82,24 @@
 		store.selected_source_code = currentSourceCode;
 
 		if (currentSourceCode === previousSourceCode) {
-			console.log(
-				`[DService_PROCESS] No change from previous ('${currentSourceCode}'). Skipping fetch.`
-			);
 			return;
 		}
 
 		const oldPreviousForLog = previousSourceCode;
 		previousSourceCode = currentSourceCode; // Update the module-level processed source
 		store.clearError();
-		console.log(
-			`[DService_PROCESS] Change confirmed from '${oldPreviousForLog}' to '${currentSourceCode}'.`
-		);
 
 		if (!currentSourceCode || !currentSourceCode.trim()) {
-			console.log(
-				`[DService_PROCESS] Empty source. Defaulting all watched SKUs.`
-			);
 			setAllWatchedSkusToDefault();
 			return;
 		}
 
-		console.log(
-			`[DService_PROCESS] Resetting maps for new source '${currentSourceCode}'.`
-		);
 		deliverableMap = {}; // Reset internal cache
 		store.map = {}; // Reset store's map
 
 		if (watchedSkus.size > 0) {
-			console.log(
-				`[DService_PROCESS] Fetching data for '${currentSourceCode}' (${watchedSkus.size} SKUs).`
-			);
 			fetchData(currentSourceCode, Array.from(watchedSkus));
 		} else {
-			console.log(
-				`[DService_PROCESS] No SKUs watched. Skipping fetch for '${currentSourceCode}'.`
-			);
 		}
 	}
 
@@ -142,9 +113,6 @@
 		if (store) {
 			store.map = { ...deliverableMap };
 		}
-		console.info(
-			"[DService] No active source code - all watched SKUs defaulted to 'Yes'."
-		);
 	}
 
 	async function fetchData(sourceCode, skus, retryCount = 0) {
@@ -170,11 +138,6 @@
 		fetchInProgress = true;
 		const store = Alpine.store("deliverability");
 		store.isLoading = true;
-		console.log(
-			`[DService_FETCH] Starting. Source: '${sourceCode}', SKUs: ${
-				skus.length
-			}, Attempt: ${retryCount + 1}`
-		);
 
 		const fetchPromise = performFetchLogic(sourceCode, skus, retryCount);
 		requestQueue.set(requestKey, fetchPromise);
@@ -185,7 +148,6 @@
 			fetchInProgress = false;
 			store.isLoading = false;
 			requestQueue.delete(requestKey);
-			// console.log(`[DService_FETCH] Completed for source: '${sourceCode}'.`);
 		}
 	}
 
@@ -279,11 +241,6 @@
 			// and ensure reactivity for the updated ones.
 			store.map = { ...store.map, ...localChanges };
 		}
-		console.log(
-			`[DService_MAP] Updated deliverability map. ${
-				Object.keys(localChanges).length
-			} SKUs affected in this batch.`
-		);
 	}
 
 	function defaultSpecificSkus(skusToDefault) {
@@ -311,7 +268,6 @@
 				// If no data exists yet (e.g. first time seeing this SKU)
 				deliverableMap[sku] = "Yes"; // Default it
 				if (store) store.map = { ...store.map, [sku]: "Yes" }; // Update store reactively
-				// console.log(`[DService_SKU] Registered new SKU: '${sku}'. Defaulted to Yes. Total watched: ${watchedSkus.size}.`);
 			}
 			// If a source code is active, fetch for this newly registered SKU
 			if (
@@ -319,9 +275,6 @@
 				store.selected_source_code &&
 				store.selected_source_code.trim() !== ""
 			) {
-				console.log(
-					`[DService_SKU] New SKU '${sku}' registered. Fetching its status for current source '${store.selected_source_code}'.`
-				);
 				fetchData(store.selected_source_code, [sku]);
 			}
 		}
@@ -347,16 +300,12 @@
 			if (store) store.map = { ...store.map, ...newDefaults };
 		}
 		if (newSkusForPotentialFetch.length > 0) {
-			// console.log(`[DService_SKU] Registered ${newSkusForPotentialFetch.length} new SKUs in batch. Total watched: ${watchedSkus.size}.`);
 			const store = Alpine.store("deliverability");
 			if (
 				store &&
 				store.selected_source_code &&
 				store.selected_source_code.trim() !== ""
 			) {
-				console.log(
-					`[DService_SKU] Fetching data for ${newSkusForPotentialFetch.length} newly batch-registered SKUs for source '${store.selected_source_code}'.`
-				);
 				fetchData(store.selected_source_code, newSkusForPotentialFetch);
 			}
 		}

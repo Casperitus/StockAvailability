@@ -2,30 +2,48 @@
     <policies>
         <policy id="script-src">
             <values>
-                <value id="www.googletagmanager.com" type="host">www.googletagmanager.com</value>
-                <value id="analytics.ahrefs.com" type="host">analytics.ahrefs.com</value>
-                <value id="connect.facebook.net" type="host">connect.facebook.net</value>
+                <value id="self" type="host">'self'</value>
+                <value id="googletagmanager" type="host">www.googletagmanager.com</value>
+                <value id="google-tagmanager" type="host">tagmanager.google.com</value>
+                <value id="ahrefs-analytics" type="host">analytics.ahrefs.com</value>
+                <value id="facebook-connect" type="host">connect.facebook.net</value>
+                <value id="alpine-js" type="host">*.alpinejs.dev</value>
+                <value id="google-analytics" type="host">www.google-analytics.com</value>
+                <value id="google-maps" type="host">maps.googleapis.com</value>
+                <value id="moyasar-cdn" type="host">cdn.moyasar.com</value>
+                <value id="polyfill-io" type="host">polyfill.io</value>
             </values>
         </policy>
+
         <policy id="style-src">
             <values>
-                <value id="fonts.googleapis.com" type="host">fonts.googleapis.com</value>
+                <value id="self" type="host">'self'</value>
+                <value id="unsafe-inline" type="host">'unsafe-inline'</value>
+                <value id="fonts-googleapis" type="host">fonts.googleapis.com</value>
             </values>
         </policy>
+
         <policy id="img-src">
             <values>
-                <value id="www.facebook.com" type="host">www.facebook.com</value>
+                <value id="self" type="host">'self'</value>
+                <value id="data" type="host">data:</value>
+                <value id="facebook-img" type="host">www.facebook.com</value>
             </values>
         </policy>
+
         <policy id="font-src">
             <values>
-                <value id="fonts.gstatic.com" type="host">fonts.gstatic.com</value>
+                <value id="self" type="host">'self'</value>
+                <value id="data" type="host">data:</value>
+                <value id="fonts-gstatic" type="host">fonts.gstatic.com</value>
             </values>
         </policy>
+
         <policy id="connect-src">
             <values>
-                <value id="www.google-analytics.com" type="host">www.google-analytics.com</value>
-                <value id="analytics.ahrefs.com" type="host">analytics.ahrefs.com</value>
+                <value id="self" type="host">'self'</value>
+                <value id="google-analytics-connect" type="host">www.google-analytics.com</value>
+                <value id="ahrefs-connect" type="host">analytics.ahrefs.com</value>
             </values>
         </policy>
     </policies>

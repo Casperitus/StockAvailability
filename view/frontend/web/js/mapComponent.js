@@ -70,7 +70,6 @@ function mapComponent(_hyvaData) {
 
 		// --- Initialization (combining old and new) ---
 		init() {
-			console.log("[MapC_Init] Initializing. Default Lat:", this.latitude);
 			if (!this._apiKey) {
 				console.error(
 					"[MapC_Init] Google Maps API key is missing. Map functionality will be disabled."
@@ -88,9 +87,6 @@ function mapComponent(_hyvaData) {
 			if (!window.mapCompPrivateContentLoaded) {
 				// Use a unique flag
 				window.addEventListener("private-content-loaded", () => {
-					console.log(
-						"[MapC_Event] private-content-loaded received. Re-fetching branch data."
-					);
 					this.fetchDeliveryBranchData();
 				});
 				window.mapCompPrivateContentLoaded = true;
@@ -99,20 +95,15 @@ function mapComponent(_hyvaData) {
 
 		// --- Data Fetching & Updating (primarily from newer, refined versions) ---
 		async fetchDeliveryBranchData() {
-			console.log("[MapC_Fetch] Attempting to fetch delivery-branch section."); // Changed log for clarity
 
 			// Check the new specific flag for this function
 			if (this.isFetchingDeliveryBranch) {
-				console.log(
-					"[MapC_Fetch] Already fetching delivery-branch section. New request skipped."
-				);
 				return;
 			}
 			this.isFetchingDeliveryBranch = true; // Set lock for this function
 
 			// The old problematic condition:
 			// if (this.isProcessing && this.isModalOpen) {
-			//     console.log("[MapC_Fetch] Currently processing. Fetch skipped.");
 			//     this.isFetchingDeliveryBranch = false; // Make sure to reset if returning early
 			//     return;
 			// }
@@ -148,10 +139,6 @@ function mapComponent(_hyvaData) {
 					customerDataStore.data["delivery-branch"] = {
 						...(deliveryBranchData || {}),
 					};
-					console.log(
-						"[MapC_Fetch] Updated Alpine customerData store. delivery-branch source:",
-						customerDataStore.data["delivery-branch"]?.selected_source_code
-					);
 				}
 
 				// Update component's local state directly
@@ -175,9 +162,6 @@ function mapComponent(_hyvaData) {
 						lng: this.longitude,
 					};
 				}
-				console.log(
-					`[MapC_Fetch] Component state updated. Current SC: '<span class="math-inline">\{this\.selectedSourceCode\}', Name\: '</span>{this.selectedBranchName}'`
-				);
 			} catch (error) {
 				console.error(
 					"[MapC_Fetch] Error fetching/processing delivery branch data:",
@@ -189,9 +173,6 @@ function mapComponent(_hyvaData) {
 		},
 
 		async updateDeliveryBranchDataOnBackend() {
-			console.log(
-				`[MapC_UpdateBackend] POSTing to /branch/update. Component SC='${this.selectedSourceCode}'`
-			);
 			this.isProcessing = true;
 			try {
 				const response = await fetch("/stockavailability/branch/update", {
@@ -211,9 +192,6 @@ function mapComponent(_hyvaData) {
 				});
 				const data = await response.json();
 				if (data.success) {
-					console.log(
-						"[MapC_UpdateBackend] Success. Re-fetching section data to sync."
-					);
 					await this.fetchDeliveryBranchData(); // This reloads store, which DS watches
 				} else {
 					throw new Error(
@@ -232,17 +210,14 @@ function mapComponent(_hyvaData) {
 		// --- Modal and UI Toggles (closer to older version's directness + newer flags) ---
 		toggleModal() {
 			this.isModalOpen = !this.isModalOpen;
-			console.log("[MapC_Modal] Toggled. Open:", this.isModalOpen);
 			if (this.isModalOpen) {
 				if (!this._apiKey) {
 					console.warn("[MapC_Modal] Cannot init map, API key missing.");
 					return;
 				}
 				if (!this.googleMapsApiLoaded) {
-					console.log("[MapC_Modal] Loading Google Maps API...");
 					this.loadGoogleMapsApi();
 				} else {
-					console.log("[MapC_Modal] API already loaded. Initializing map.");
 					// Use setTimeout to ensure DOM is ready if modal has transitions
 					setTimeout(() => this.initMap(), 50);
 				}
@@ -255,12 +230,8 @@ function mapComponent(_hyvaData) {
 			window.componentInitMap = this.initMap.bind(this); // Bind `this` context
 
 			if (document.querySelector('script[src*="maps.googleapis.com"]')) {
-				console.log("[MapC_LoadAPI] Maps script tag already present.");
 				this.googleMapsApiLoaded = true; // Assume loaded
 				if (typeof google !== "undefined" && google.maps) {
-					console.log(
-						"[MapC_LoadAPI] google.maps object found. Initializing map."
-					);
 					window.componentInitMap(); // Call it directly
 				} else {
 					console.warn(
@@ -271,7 +242,6 @@ function mapComponent(_hyvaData) {
 				return;
 			}
 
-			console.log("[MapC_LoadAPI] Creating Google Maps script tag.");
 			const script = document.createElement("script");
 			// Using this._apiKey from component state
 			script.src = `https://maps.googleapis.com/maps/api/js?key=${this._apiKey}&libraries=places&callback=componentInitMap`;
@@ -285,7 +255,6 @@ function mapComponent(_hyvaData) {
 		},
 
 		initMap() {
-			console.log("[MapC_InitMap] Attempting to initialize map.");
 			if (typeof google === "undefined" || typeof google.maps === "undefined") {
 				console.error(
 					"[MapC_InitMap] Google Maps API (google.maps) not available."
@@ -312,7 +281,6 @@ function mapComponent(_hyvaData) {
 			}
 
 			const center = { lat: this.latitude, lng: this.longitude };
-			console.log("[MapC_InitMap] Centering map at:", center);
 			const mapOptions = {
 				center: center,
 				zoom: 12, // Zoom from newer version, 8 was in old
@@ -324,7 +292,6 @@ function mapComponent(_hyvaData) {
 			try {
 				this.map = new google.maps.Map(mapContainer, mapOptions);
 				this.googleMapsApiLoaded = true; // Set flag here upon successful map creation
-				console.log("[MapC_InitMap] Map object created.");
 
 				this.createMarker(center); // createMarker from newer version
 				this.initAutocomplete(); // initAutocomplete from newer version
@@ -404,7 +371,6 @@ function mapComponent(_hyvaData) {
 			}
 			const geocoder = new google.maps.Geocoder();
 			const latlng = { lat: this.latitude, lng: this.longitude };
-			// console.log("[MapC_ReverseGeo] Geocoding for:", latlng);
 			geocoder.geocode({ location: latlng }, (results, status) => {
 				if (status === "OK" && results && results[0]) {
 					this.currentAddress = results[0].formatted_address;
@@ -415,7 +381,6 @@ function mapComponent(_hyvaData) {
 					this.parseAddressComponents(results[0].address_components);
 					this.isAddressValid = true; // Address from geocoding is valid
 					this.clearAddressError();
-					// console.log("[MapC_ReverseGeo] Success:", this.currentAddress);
 				} else {
 					console.error("[MapC_ReverseGeo] Geocode failed:", status);
 					this.isAddressValid = false; // Geocoding failed
@@ -425,11 +390,7 @@ function mapComponent(_hyvaData) {
 
 		// --- Location Confirmation & Branch Logic (from NEWER, refined versions) ---
 		async confirmLocation() {
-			console.log(
-				`[MapC_Confirm] Attempting for Lat: ${this.latitude}, Lng: ${this.longitude}`
-			);
 			if (this.isProcessing) {
-				console.log("[MapC_Confirm] Already processing.");
 				return;
 			}
 
@@ -447,7 +408,6 @@ function mapComponent(_hyvaData) {
 					// Only show error if address was attempted
 					this.showAddressError(labelEnterValidAddress); // Use label
 				}
-				console.log("[MapC_Confirm] Address not valid.");
 				return;
 			}
 			this.clearAddressError();
@@ -469,9 +429,6 @@ function mapComponent(_hyvaData) {
 					this.selectedBranchPhone = nearestBranch.phone;
 					this.selectedSourceCode = nearestBranch.source_code;
 				}
-				console.log(
-					`[MapC_Confirm] Branch choice: SC='${this.selectedSourceCode}', Name='${this.selectedBranchName}'.`
-				);
 
 				if (this._isLoggedIn) {
 					try {
@@ -494,7 +451,6 @@ function mapComponent(_hyvaData) {
 		},
 
 		selectAddress(address) {
-			console.log("[MapC_SelectAddr] Saved address selected:", address.details);
 			if (
 				!address ||
 				typeof address.latitude === "undefined" ||
@@ -535,9 +491,6 @@ function mapComponent(_hyvaData) {
 				this.selectedBranchPhone = nearestBranch.phone;
 				this.selectedSourceCode = nearestBranch.source_code;
 			}
-			console.log(
-				`[MapC_SelectAddr] Branch choice: SC='${this.selectedSourceCode}', Name='${this.selectedBranchName}'.`
-			);
 
 			this.updateDeliveryBranchDataOnBackend()
 				.then(() => {
