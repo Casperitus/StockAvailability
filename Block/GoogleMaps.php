@@ -13,8 +13,7 @@ use Magento\Framework\Registry;
 use Magento\ConfigurableProduct\Model\Product\Type\Configurable as ConfigurableType;
 use Magento\GroupedProduct\Model\Product\Type\Grouped as GroupedType;
 use Magento\Framework\Data\Form\FormKey;
-use Magento\Framework\App\ObjectManager; // Add this line
-
+use Magento\Framework\App\ObjectManager;
 
 class GoogleMaps extends Template
 {
@@ -36,7 +35,7 @@ class GoogleMaps extends Template
         CustomerSession $customerSession,
         AddressRepositoryInterface $addressRepository,
         CustomerRepositoryInterface $customerRepository,
-        FormKey $formKey = null, // Make the formKey optional
+        FormKey $formKey = null,
         array $data = []
     ) {
         $this->stockHelper = $stockHelper;
@@ -46,7 +45,7 @@ class GoogleMaps extends Template
         $this->customerSession = $customerSession;
         $this->addressRepository = $addressRepository;
         $this->customerRepository = $customerRepository;
-        $this->formKey = $formKey ?: ObjectManager::getInstance()->get(FormKey::class); // Use ObjectManager if null
+        $this->formKey = $formKey ?: ObjectManager::getInstance()->get(FormKey::class);
         parent::__construct($context, $data);
     }
 
@@ -62,6 +61,7 @@ class GoogleMaps extends Template
             \Magento\Store\Model\ScopeInterface::SCOPE_STORE
         );
     }
+
     /**
      * Get IP-Restricted API Key
      *
@@ -84,30 +84,38 @@ class GoogleMaps extends Template
     public function getProductData()
     {
         $product = $this->registry->registry('current_product');
+
+        // Return empty data if no product (e.g., during registration)
+        if (!$product) {
+            return [
+                'sku' => null,
+                'id' => null,
+                'is_global_shipping' => false,
+            ];
+        }
+
         $productData = [
-            'sku' => $product ? $product->getSku() : null,
-            'id' => $product ? $product->getId() : null,
-            'is_global_shipping' => $product ? (bool) $product->getData('is_global_shipping') : false,
+            'sku' => $product->getSku(),
+            'id' => $product->getId(),
+            'is_global_shipping' => (bool) $product->getData('is_global_shipping'),
         ];
 
-        if ($product) {
-            if ($product->getTypeId() == ConfigurableType::TYPE_CODE) {
-                $childProducts = $product->getTypeInstance()->getUsedProducts($product);
-                $productData['child_skus'] = array_map(function ($childProduct) {
-                    return [
-                        'sku' => $childProduct->getSku(),
-                        'id' => $childProduct->getId(),
-                    ];
-                }, $childProducts);
-            } elseif ($product->getTypeId() == GroupedType::TYPE_CODE) {
-                $childProducts = $product->getTypeInstance()->getAssociatedProducts($product);
-                $productData['child_skus'] = array_map(function ($childProduct) {
-                    return [
-                        'sku' => $childProduct->getSku(),
-                        'id' => $childProduct->getId(),
-                    ];
-                }, $childProducts);
-            }
+        if ($product->getTypeId() == ConfigurableType::TYPE_CODE) {
+            $childProducts = $product->getTypeInstance()->getUsedProducts($product);
+            $productData['child_skus'] = array_map(function ($childProduct) {
+                return [
+                    'sku' => $childProduct->getSku(),
+                    'id' => $childProduct->getId(),
+                ];
+            }, $childProducts);
+        } elseif ($product->getTypeId() == GroupedType::TYPE_CODE) {
+            $childProducts = $product->getTypeInstance()->getAssociatedProducts($product);
+            $productData['child_skus'] = array_map(function ($childProduct) {
+                return [
+                    'sku' => $childProduct->getSku(),
+                    'id' => $childProduct->getId(),
+                ];
+            }, $childProducts);
         }
 
         return $productData;
@@ -128,6 +136,7 @@ class GoogleMaps extends Template
     {
         return $_COOKIE['customer_longitude'] ?? null;
     }
+
     public function isCustomerLoggedIn()
     {
         return $this->customerSession->isLoggedIn();
@@ -196,7 +205,6 @@ class GoogleMaps extends Template
         return $addresses;
     }
 
-
     public function geocodeAddress($address)
     {
         $geocodeUrl = "https://maps.googleapis.com/maps/api/geocode/json?address=" . urlencode($address) . "&key=" . $this->getReferrerApiKey();
@@ -213,6 +221,7 @@ class GoogleMaps extends Template
 
         return null;
     }
+
     public function prepareHyvaData()
     {
         $customerData = [];
@@ -235,7 +244,7 @@ class GoogleMaps extends Template
             'longitude' => $this->getCustomerLongitude(),
             'savedAddresses' => $this->getCustomerAddresses(),
             'customerData' => $customerData,
-            'sourcesData' => $sourcesData, // Include sources data
+            'sourcesData' => $sourcesData,
             'selected_source_code' =>  $this->getSelectedSourceCode(),
         ];
     }

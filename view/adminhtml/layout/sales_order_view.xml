@@ -2,7 +2,7 @@
 <page xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:View/Layout/etc/page_configuration.xsd">
     <body>
         <referenceContainer name="extra_customer_info">
-            <block class="Madar\StockAvailability\Block\Adminhtml\Order\View\DeliveryInfo" name="order_delivery_info" template="Madar_StockAvailability::order/view/delivery_info.phtml"/>
+            <block class="Madar\StockAvailability\Block\Adminhtml\Order\View\DeliveryInfo" name="order_delivery_info" template="Madar_StockAvailability::order/view/delivery_info.phtml" after="-"/>
         </referenceContainer>
     </body>
 </page>

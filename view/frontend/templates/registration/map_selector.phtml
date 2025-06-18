@@ -1,0 +1,319 @@
+<?php
+
+/**
+ * Map selector for registration form
+ * @var \Madar\StockAvailability\Block\GoogleMaps $block
+ */
+$hyvaData = $block->prepareHyvaData();
+?>
+
+<div x-data="registrationMapComponent()" x-init="init()" class="registration-map-selector">
+    <script>
+        window.registrationMapData = <?= json_encode($hyvaData, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
+    </script>
+
+    <!-- Map Search Input -->
+    <div class="mb-4">
+        <label for="map-address-search" class="text-sm font-medium text-gray-700">
+            <?= __('Search Address on Map') ?>
+        </label>
+        <div class="relative mt-1">
+            <input
+                type="text"
+                id="map-address-search"
+                x-ref="addressSearch"
+                @input="onAddressInput($event)"
+                placeholder="<?= $escaper->escapeHtmlAttr(__('Start typing to search...')) ?>"
+                class="form-input w-full border border-gray-300 rounded-md px-3 py-2 text-sm sm:text-base focus:outline-none focus:ring-paprika-500 focus:border-paprika-500">
+
+            <!-- Use Current Location Button -->
+            <button
+                type="button"
+                @click="useCurrentLocation()"
+                class="absolute right-2 top-1/2 transform -translate-y-1/2 text-paprika-600 hover:text-paprika-700"
+                title="<?= $escaper->escapeHtmlAttr(__('Use my current location')) ?>">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    <!-- Map Container -->
+    <div
+        id="registration-map-container"
+        x-ref="mapContainer"
+        class="w-full h-64 mb-4 border border-gray-300 rounded-md shadow-sm bg-gray-100"
+        x-show="mapLoaded">
+    </div>
+
+    <!-- Hidden inputs for coordinates -->
+    <input type="hidden" name="latitude" :value="latitude">
+    <input type="hidden" name="longitude" :value="longitude">
+
+    <!-- Selected Location Display -->
+    <div x-show="hasSelectedLocation" class="p-3 bg-green-50 border border-green-200 rounded-md">
+        <p class="text-sm text-green-800">
+            <strong><?= __('Selected Location:') ?></strong>
+            <span x-text="selectedAddress"></span>
+        </p>
+    </div>
+</div>
+
+<script>
+    function registrationMapComponent() {
+        return {
+            map: null,
+            marker: null,
+            autocomplete: null,
+            mapLoaded: false,
+            latitude: <?= json_encode($hyvaData['latitude'] ?? 24.7136) ?>,
+            longitude: <?= json_encode($hyvaData['longitude'] ?? 46.6753) ?>,
+            selectedAddress: '',
+            hasSelectedLocation: false,
+            googleMapsApiLoaded: false,
+
+            init() {
+                // Load Google Maps API
+                if (!window.registrationMapData?.apiKey) {
+                    console.error('[RegMap] Google Maps API key is missing');
+                    return;
+                }
+                this.loadGoogleMapsApi();
+            },
+
+            loadGoogleMapsApi() {
+                // Check if already loaded
+                if (typeof google !== 'undefined' && google.maps) {
+                    this.googleMapsApiLoaded = true;
+                    this.initMap();
+                    return;
+                }
+
+                // Create callback
+                window.initRegistrationMap = () => {
+                    this.googleMapsApiLoaded = true;
+                    this.initMap();
+                };
+
+                // Load script
+                const script = document.createElement('script');
+                script.src = `https://maps.googleapis.com/maps/api/js?key=${window.registrationMapData.apiKey}&libraries=places&callback=initRegistrationMap`;
+                script.async = true;
+                script.defer = true;
+                document.head.appendChild(script);
+            },
+
+            initMap() {
+                const mapContainer = this.$refs.mapContainer;
+                if (!mapContainer || !this.googleMapsApiLoaded) return;
+
+                // Initialize map
+                this.map = new google.maps.Map(mapContainer, {
+                    center: {
+                        lat: this.latitude,
+                        lng: this.longitude
+                    },
+                    zoom: 12,
+                    mapTypeControl: false,
+                    streetViewControl: false,
+                    fullscreenControl: false
+                });
+
+                // Add marker
+                this.marker = new google.maps.Marker({
+                    position: {
+                        lat: this.latitude,
+                        lng: this.longitude
+                    },
+                    map: this.map,
+                    draggable: true
+                });
+
+                // Handle marker drag
+                this.marker.addListener('dragend', (event) => {
+                    this.updateLocation(event.latLng.lat(), event.latLng.lng());
+                });
+
+                // Initialize autocomplete
+                this.initAutocomplete();
+
+                this.mapLoaded = true;
+            },
+
+            initAutocomplete() {
+                const input = this.$refs.addressSearch;
+                if (!input || !google.maps.places) return;
+
+                this.autocomplete = new google.maps.places.Autocomplete(input, {
+                    componentRestrictions: {
+                        country: 'sa'
+                    },
+                    fields: ['address_components', 'formatted_address', 'geometry']
+                });
+
+                this.autocomplete.addListener('place_changed', () => {
+                    const place = this.autocomplete.getPlace();
+                    if (!place.geometry || !place.geometry.location) {
+                        alert('<?= __('Please select a valid address from the dropdown') ?>');
+                        return;
+                    }
+
+                    const location = place.geometry.location;
+                    this.updateLocation(location.lat(), location.lng(), place.formatted_address);
+
+                    // Center map on selected location
+                    this.map.setCenter(location);
+                    this.marker.setPosition(location);
+
+                    // Parse address components to fill form fields
+                    this.parseAddressComponents(place.address_components);
+                });
+            },
+
+            updateLocation(lat, lng, address = null) {
+                this.latitude = lat;
+                this.longitude = lng;
+                this.hasSelectedLocation = true;
+
+                // Update parent Alpine component if exists
+                if (this.$root.formData) {
+                    this.$root.formData.latitude = lat;
+                    this.$root.formData.longitude = lng;
+                }
+
+                // If no address provided, reverse geocode
+                if (!address && google.maps.Geocoder) {
+                    const geocoder = new google.maps.Geocoder();
+                    geocoder.geocode({
+                        location: {
+                            lat,
+                            lng
+                        }
+                    }, (results, status) => {
+                        if (status === 'OK' && results[0]) {
+                            this.selectedAddress = results[0].formatted_address;
+                            this.parseAddressComponents(results[0].address_components);
+                        }
+                    });
+                } else {
+                    this.selectedAddress = address;
+                }
+            },
+
+            parseAddressComponents(components) {
+                if (!components) return;
+
+                const componentMap = {
+                    street_number: '',
+                    route: '',
+                    locality: '',
+                    administrative_area_level_1: '',
+                    postal_code: '',
+                    country: ''
+                };
+
+                components.forEach(component => {
+                    const type = component.types[0];
+                    if (componentMap.hasOwnProperty(type)) {
+                        componentMap[type] = component.long_name;
+                    }
+                    if (type === 'country') {
+                        componentMap.country = component.short_name;
+                    }
+                });
+
+                // Update the actual form inputs directly
+                const street = [componentMap.street_number, componentMap.route].filter(Boolean).join(' ');
+
+                // Find and update the form fields by their IDs
+                const streetInput = document.getElementById('street');
+                const cityInput = document.getElementById('city');
+                const regionInput = document.getElementById('region');
+                const postcodeInput = document.getElementById('postcode');
+                const countrySelect = document.querySelector('select[name="country_id"]');
+
+                if (streetInput && street) {
+                    streetInput.value = street;
+                    streetInput.dispatchEvent(new Event('input', {
+                        bubbles: true
+                    }));
+                }
+
+                if (cityInput && componentMap.locality) {
+                    cityInput.value = componentMap.locality;
+                    cityInput.dispatchEvent(new Event('input', {
+                        bubbles: true
+                    }));
+                }
+
+                if (regionInput && componentMap.administrative_area_level_1) {
+                    regionInput.value = componentMap.administrative_area_level_1;
+                    regionInput.dispatchEvent(new Event('input', {
+                        bubbles: true
+                    }));
+                }
+
+                if (postcodeInput && componentMap.postal_code) {
+                    postcodeInput.value = componentMap.postal_code;
+                    postcodeInput.dispatchEvent(new Event('input', {
+                        bubbles: true
+                    }));
+                }
+
+                if (countrySelect && componentMap.country) {
+                    countrySelect.value = componentMap.country;
+                    countrySelect.dispatchEvent(new Event('change', {
+                        bubbles: true
+                    }));
+                }
+
+                // Also dispatch a custom event that the parent component can listen to
+                window.dispatchEvent(new CustomEvent('map-address-selected', {
+                    detail: {
+                        street: street,
+                        city: componentMap.locality,
+                        region: componentMap.administrative_area_level_1,
+                        postcode: componentMap.postal_code,
+                        country: componentMap.country,
+                        latitude: this.latitude,
+                        longitude: this.longitude
+                    }
+                }));
+            },
+
+            useCurrentLocation() {
+                if (!navigator.geolocation) {
+                    alert('<?= __('Geolocation is not supported by your browser') ?>');
+                    return;
+                }
+
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        const lat = position.coords.latitude;
+                        const lng = position.coords.longitude;
+
+                        this.updateLocation(lat, lng);
+
+                        // Update map
+                        const newPosition = {
+                            lat,
+                            lng
+                        };
+                        this.map.setCenter(newPosition);
+                        this.marker.setPosition(newPosition);
+                    },
+                    (error) => {
+                        console.error('Geolocation error:', error);
+                        alert('<?= __('Unable to get your location. Please search for your address.') ?>');
+                    }
+                );
+            },
+
+            onAddressInput(event) {
+                // This is handled by Google Places Autocomplete
+            }
+        };
+    }
+</script>
