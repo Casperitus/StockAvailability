@@ -1,0 +1,178 @@
+<?php
+
+/** @var \Madar\StockAvailability\Block\Adminhtml\Order\View\DeliveryInfo $block */
+$order = $block->getOrder();
+$shippingAddress = $order ? $order->getShippingAddress() : null;
+$deliveryBranch = $block->getDeliveryBranch();
+$apiKey = $block->getApiKey();
+?>
+
+<?php if ($shippingAddress): ?>
+    <div class="admin__page-section-item order-delivery-info">
+        <div class="admin__page-section-item-title">
+            <span class="title"><?= __('Delivery Information') ?></span>
+        </div>
+        <div class="admin__page-section-item-content">
+            <table class="admin__table-secondary order-delivery-table">
+                <tbody>
+                    <?php if ($shippingAddress->getData('latitude') && $shippingAddress->getData('longitude')): ?>
+                        <tr>
+                            <th><?= __('Customer Location') ?>:</th>
+                            <td>
+                                <div class="delivery-location-info">
+                                    <p>
+                                        <?= __('Latitude') ?>: <?= $shippingAddress->getData('latitude') ?><br />
+                                        <?= __('Longitude') ?>: <?= $shippingAddress->getData('longitude') ?>
+                                    </p>
+                                    <p class="delivery-actions">
+                                        <a href="<?= $block->getGoogleMapsUrl(
+                                                        $shippingAddress->getData('latitude'),
+                                                        $shippingAddress->getData('longitude')
+                                                    ) ?>"
+                                            target="_blank"
+                                            class="action-link">
+                                            <?= __('View on Google Maps') ?>
+                                        </a>
+                                    </p>
+                                </div>
+                            </td>
+                        </tr>
+                    <?php endif; ?>
+
+                    <?php if ($deliveryBranch): ?>
+                        <tr>
+                            <th><?= __('Assigned Branch') ?>:</th>
+                            <td>
+                                <div class="branch-info">
+                                    <strong><?= $deliveryBranch['name'] ?></strong>
+                                    (<?= $deliveryBranch['code'] ?>)<br />
+                                    <?php if ($deliveryBranch['phone']): ?>
+                                        <?= __('Phone') ?>: <?= $deliveryBranch['phone'] ?><br />
+                                    <?php endif; ?>
+                                    <?= __('Distance') ?>: <?= $deliveryBranch['distance'] ?> km
+                                </div>
+                            </td>
+                        </tr>
+                    <?php else: ?>
+                        <tr>
+                            <th><?= __('Delivery Branch') ?>:</th>
+                            <td>
+                                <span class="no-branch-warning">
+                                    <?= __('No branch within delivery range') ?>
+                                </span>
+                            </td>
+                        </tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+
+            <?php if ($apiKey && $shippingAddress->getData('latitude') && $shippingAddress->getData('longitude')): ?>
+                <!-- Interactive Map -->
+                <div class="delivery-map-container" style="margin-top: 20px;">
+                    <div id="order-delivery-map" style="width: 100%; height: 300px; border: 1px solid #ccc;"></div>
+                </div>
+
+                <script>
+                    require(['jquery'], function($) {
+                        function initOrderMap() {
+                            var map = new google.maps.Map(document.getElementById('order-delivery-map'), {
+                                center: {
+                                    lat: <?= (float)$shippingAddress->getData('latitude') ?>,
+                                    lng: <?= (float)$shippingAddress->getData('longitude') ?>
+                                },
+                                zoom: 12,
+                                mapTypeControl: false
+                            });
+
+                            // Customer marker
+                            new google.maps.Marker({
+                                position: {
+                                    lat: <?= (float)$shippingAddress->getData('latitude') ?>,
+                                    lng: <?= (float)$shippingAddress->getData('longitude') ?>
+                                },
+                                map: map,
+                                title: '<?= __('Customer Location') ?>',
+                                icon: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png'
+                            });
+
+                            <?php if ($deliveryBranch): ?>
+                                // Branch marker
+                                new google.maps.Marker({
+                                    position: {
+                                        lat: <?= (float)$deliveryBranch['latitude'] ?>,
+                                        lng: <?= (float)$deliveryBranch['longitude'] ?>
+                                    },
+                                    map: map,
+                                    title: '<?= $deliveryBranch['name'] ?>',
+                                    icon: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png'
+                                });
+
+                                // Draw line between customer and branch
+                                new google.maps.Polyline({
+                                    path: [{
+                                            lat: <?= (float)$shippingAddress->getData('latitude') ?>,
+                                            lng: <?= (float)$shippingAddress->getData('longitude') ?>
+                                        },
+                                        {
+                                            lat: <?= (float)$deliveryBranch['latitude'] ?>,
+                                            lng: <?= (float)$deliveryBranch['longitude'] ?>
+                                        }
+                                    ],
+                                    geodesic: true,
+                                    strokeColor: '#FF0000',
+                                    strokeOpacity: 0.8,
+                                    strokeWeight: 2,
+                                    map: map
+                                });
+                            <?php endif; ?>
+                        }
+
+                        // Load Google Maps API
+                        if (typeof google === 'undefined' || typeof google.maps === 'undefined') {
+                            var script = document.createElement('script');
+                            script.src = 'https://maps.googleapis.com/maps/api/js?key=<?= $apiKey ?>&callback=initOrderMap';
+                            script.async = true;
+                            script.defer = true;
+                            window.initOrderMap = initOrderMap;
+                            document.head.appendChild(script);
+                        } else {
+                            initOrderMap();
+                        }
+                    });
+                </script>
+            <?php endif; ?>
+        </div>
+    </div>
+
+    <style>
+        .order-delivery-info {
+            margin-top: 20px;
+        }
+
+        .delivery-location-info p {
+            margin: 5px 0;
+        }
+
+        .delivery-actions {
+            margin-top: 10px;
+        }
+
+        .action-link {
+            color: #007bdb;
+            text-decoration: none;
+        }
+
+        .action-link:hover {
+            text-decoration: underline;
+        }
+
+        .branch-info {
+            line-height: 1.5;
+        }
+
+        .no-branch-warning {
+            color: #e22626;
+            font-style: italic;
+        }
+    </style>
+<?php endif; ?>
