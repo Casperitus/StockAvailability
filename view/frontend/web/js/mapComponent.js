@@ -91,11 +91,14 @@ function mapComponent(_hyvaData) {
 				});
 				window.mapCompPrivateContentLoaded = true;
 			}
+			// Auto-select default shipping address if conditions are met
+			if (hyvaData.shouldAutoSelectAddress && hyvaData.defaultShippingAddress) {
+				this.autoSelectDefaultAddress();
+			}
 		},
 
 		// --- Data Fetching & Updating (primarily from newer, refined versions) ---
 		async fetchDeliveryBranchData() {
-
 			// Check the new specific flag for this function
 			if (this.isFetchingDeliveryBranch) {
 				return;
@@ -162,6 +165,14 @@ function mapComponent(_hyvaData) {
 						lng: this.longitude,
 					};
 				}
+				if (
+					!this.selectedSourceCode &&
+					this._isLoggedIn &&
+					!this._hasAutoSelected
+				) {
+					this._hasAutoSelected = true; // Prevent multiple auto-selections
+					this.checkAndAutoSelectDefaultAddress();
+				}
 			} catch (error) {
 				console.error(
 					"[MapC_Fetch] Error fetching/processing delivery branch data:",
@@ -169,6 +180,67 @@ function mapComponent(_hyvaData) {
 				);
 			} finally {
 				this.isFetchingDeliveryBranch = false; // Release lock for this function
+			}
+		},
+
+		checkAndAutoSelectDefaultAddress() {
+			// Only auto-select if we have saved addresses and no source is selected
+			if (this.savedAddresses.length > 0 && !this.selectedSourceCode) {
+				// Find default shipping address
+				const defaultAddress = this.savedAddresses.find(
+					(addr) => addr.is_default_shipping
+				);
+
+				if (
+					defaultAddress &&
+					defaultAddress.latitude &&
+					defaultAddress.longitude
+				) {
+					console.log(
+						"[MapC_AutoSelect] Auto-selecting default shipping address"
+					);
+
+					// Don't open modal, just process the selection
+					this.isProcessing = true;
+
+					// Update coordinates
+					this.updateCoordinates(
+						parseFloat(defaultAddress.latitude),
+						parseFloat(defaultAddress.longitude)
+					);
+
+					// Find nearest branch
+					const nearestBranch = this.findNearestBranch(
+						this.latitude,
+						this.longitude,
+						this._sourcesData
+					);
+
+					if (nearestBranch) {
+						this.selectedBranchName = nearestBranch.source_name;
+						this.selectedBranchPhone = nearestBranch.phone;
+						this.selectedSourceCode = nearestBranch.source_code;
+
+						// Update backend
+						this.updateDeliveryBranchDataOnBackend()
+							.then(() => {
+								console.log(
+									"[MapC_AutoSelect] Default address auto-selected successfully"
+								);
+							})
+							.catch((error) => {
+								console.error("[MapC_AutoSelect] Error:", error);
+							})
+							.finally(() => {
+								this.isProcessing = false;
+							});
+					} else {
+						this.isProcessing = false;
+						console.log(
+							"[MapC_AutoSelect] No branch within range of default address"
+						);
+					}
+				}
 			}
 		},
 
@@ -505,6 +577,47 @@ function mapComponent(_hyvaData) {
 				.finally(() => {
 					this.isProcessing = false;
 				});
+		},
+
+		// Add new method:
+		autoSelectDefaultAddress() {
+			const defaultAddr = this._hyvaData.defaultShippingAddress;
+			if (!defaultAddr || !defaultAddr.latitude || !defaultAddr.longitude)
+				return;
+
+			// Find the address in saved addresses
+			const savedAddr = this.savedAddresses.find(
+				(addr) => addr.id === defaultAddr.address_id
+			);
+
+			if (savedAddr) {
+				// Auto-select without opening modal
+				this.selectAddress(savedAddr);
+			} else {
+				// If not found in saved list, still update coordinates
+				this.updateCoordinates(
+					parseFloat(defaultAddr.latitude),
+					parseFloat(defaultAddr.longitude)
+				);
+
+				// Find nearest branch
+				const nearestBranch = this.findNearestBranch(
+					this.latitude,
+					this.longitude,
+					this._sourcesData
+				);
+
+				if (nearestBranch) {
+					this.selectedBranchName = nearestBranch.source_name;
+					this.selectedBranchPhone = nearestBranch.phone;
+					this.selectedSourceCode = nearestBranch.source_code;
+
+					// Update backend silently
+					this.updateDeliveryBranchDataOnBackend().catch((error) => {
+						console.error("[MapC_AutoSelect] Error:", error);
+					});
+				}
+			}
 		},
 
 		// --- Helper methods (merged from old and new) ---

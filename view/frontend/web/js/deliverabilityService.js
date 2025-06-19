@@ -29,6 +29,8 @@
 				selected_source_code: "", // This will be updated by the effect watcher
 				isLoading: false,
 				error: null,
+				hideUndeliverable:
+					localStorage.getItem("hideUndeliverable") === "true" || false,
 				isDeliverable(sku) {
 					return this.map[sku] === "Yes";
 				},
@@ -44,6 +46,19 @@
 				},
 				clearError() {
 					this.error = null;
+				},
+				savePreference() {
+					localStorage.setItem("hideUndeliverable", this.hideUndeliverable);
+					// Trigger visibility update
+					this.updateProductVisibility();
+				},
+				updateProductVisibility() {
+					// Dispatch custom event that product listings can listen to
+					window.dispatchEvent(
+						new CustomEvent("deliverability-filter-changed", {
+							detail: { hideUndeliverable: this.hideUndeliverable },
+						})
+					);
 				},
 			});
 		}

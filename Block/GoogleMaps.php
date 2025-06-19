@@ -205,6 +205,40 @@ class GoogleMaps extends Template
         return $addresses;
     }
 
+    public function getDefaultShippingAddressCoordinates()
+    {
+        if ($this->isCustomerLoggedIn()) {
+            $customerId = $this->customerSession->getCustomerId();
+            try {
+                $customer = $this->customerRepository->getById($customerId);
+                $addresses = $customer->getAddresses();
+
+                foreach ($addresses as $address) {
+                    if ($address->isDefaultShipping()) {
+                        $latitude = $address->getCustomAttribute('latitude')
+                            ? $address->getCustomAttribute('latitude')->getValue()
+                            : null;
+                        $longitude = $address->getCustomAttribute('longitude')
+                            ? $address->getCustomAttribute('longitude')->getValue()
+                            : null;
+
+                        if ($latitude && $longitude) {
+                            return [
+                                'latitude' => $latitude,
+                                'longitude' => $longitude,
+                                'address_id' => $address->getId()
+                            ];
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+                $this->_logger->error($e->getMessage());
+            }
+        }
+        return null;
+    }
+
+
     public function geocodeAddress($address)
     {
         $geocodeUrl = "https://maps.googleapis.com/maps/api/geocode/json?address=" . urlencode($address) . "&key=" . $this->getReferrerApiKey();
@@ -237,6 +271,12 @@ class GoogleMaps extends Template
         // Fetch sources data
         $sourcesData = $this->stockHelper->getAllSourcesWithHubs();
 
+        // Get default shipping address
+        $defaultShippingCoords = $this->getDefaultShippingAddressCoordinates();
+
+        // Only auto-select if no source is already selected
+        $shouldAutoSelect = $defaultShippingCoords && !$this->getSelectedSourceCode();
+
         return [
             'apiKey' => $this->getReferrerApiKey(),
             'isLoggedIn' => $this->isCustomerLoggedIn(),
@@ -245,7 +285,9 @@ class GoogleMaps extends Template
             'savedAddresses' => $this->getCustomerAddresses(),
             'customerData' => $customerData,
             'sourcesData' => $sourcesData,
-            'selected_source_code' =>  $this->getSelectedSourceCode(),
+            'selected_source_code' => $this->getSelectedSourceCode(),
+            'defaultShippingAddress' => $defaultShippingCoords,
+            'shouldAutoSelectAddress' => $shouldAutoSelect,
         ];
     }
 }

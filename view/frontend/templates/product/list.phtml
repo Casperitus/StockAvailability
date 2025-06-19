@@ -1,0 +1,107 @@
+<?php
+
+/**
+ * Override for Hyvä product list to add deliverability filtering
+ */
+
+use Hyva\Theme\Model\ViewModelRegistry;
+use Hyva\Theme\ViewModel\CurrentCategory;
+use Hyva\Theme\ViewModel\ProductListItem;
+use Hyva\Theme\ViewModel\ProductPage;
+use Magento\Catalog\Block\Product\ListProduct;
+use Magento\Framework\Escaper;
+
+/** @var ListProduct $block */
+/** @var Escaper $escaper */
+/** @var ViewModelRegistry $viewModels */
+
+$productViewModel = $viewModels->require(ProductPage::class);
+$productListItemViewModel = $viewModels->require(ProductListItem::class);
+$currentCategoryViewModel = $viewModels->require(CurrentCategory::class);
+$eagerLoadImagesCount = (int) ($block->getData('eager_load_images_count') ?? 3);
+$productCollection = $block->getLoadedProductCollection();
+?>
+
+<script>
+    // Product visibility controller
+    function productVisibility(sku) {
+        return {
+            sku: sku,
+
+            get isVisible() {
+                const store = Alpine.store('deliverability');
+                if (!store || !store.hideUndeliverable) {
+                    return true;
+                }
+
+                if (!store.selected_source_code) {
+                    return true;
+                }
+
+                return store.isDeliverable(this.sku);
+            },
+
+            init() {
+                DeliverabilityService.registerSku(this.sku);
+
+                // Re-evaluate visibility when filter changes
+                window.addEventListener('deliverability-filter-changed', () => {
+                    this.$nextTick(() => {
+                        // Force Alpine to re-evaluate
+                    });
+                });
+            }
+        }
+    }
+</script>
+
+<?php if (!$productCollection->count()): ?>
+    <div class="message info empty">
+        <div><?= $escaper->escapeHtml(__('We can\'t find products matching the selection.')) ?></div>
+    </div>
+<?php else: ?>
+    <section class="py-8" id="product-list" aria-label="<?= $escaper->escapeHtmlAttr(__('Product list')) ?>" tabindex="-1">
+        <?= $block->getToolbarHtml() ?>
+        <?= $block->getAdditionalHtml() ?>
+
+        <?php
+        if ($block->getMode() == 'grid') {
+            $viewMode = 'grid';
+            $imageDisplayArea = 'category_page_grid';
+            $showDescription = false;
+            $templateType = \Magento\Catalog\Block\Product\ReviewRendererInterface::SHORT_VIEW;
+        } else {
+            $viewMode = 'list';
+            $imageDisplayArea = 'category_page_list';
+            $showDescription = true;
+            $templateType = \Magento\Catalog\Block\Product\ReviewRendererInterface::FULL_VIEW;
+        }
+        ?>
+
+        <div class="products wrapper mode-<?= $viewMode ?> products-<?= $viewMode ?>">
+            <ul role="list" class="mx-auto pt-4 pb-12 grid gap-4 grid-cols-1 <?= $viewMode === 'grid' ? 'sm:grid-cols-2 xl:grid-cols-3' : '' ?>">
+                <?php foreach (array_values($productCollection->getItems()) as $i => $product): ?>
+                    <?php
+                    if ($i < $eagerLoadImagesCount) {
+                        $product->setData('image_custom_attributes', ['loading' => 'eager', 'fetchpriority' => 'high']);
+                    }
+                    ?>
+                    <li class="flex flex-col"
+                        x-data="productVisibility('<?= $escaper->escapeJs($product->getSku()) ?>')"
+                        x-show="isVisible"
+                        x-transition>
+                        <?= $productListItemViewModel->getItemHtml(
+                            $product,
+                            $block,
+                            $viewMode,
+                            $templateType,
+                            $imageDisplayArea,
+                            $showDescription
+                        ); ?>
+                    </li>
+                <?php endforeach; ?>
+            </ul>
+        </div>
+        <?= $block->getChildBlock('toolbar')->setIsBottom(true)->toHtml() ?>
+    </section>
+<?php endif; ?>

@@ -6,5 +6,12 @@
                 <argument name="template" xsi:type="string">Madar_StockAvailability::product/view/stock-status.phtml</argument>
             </action>
         </referenceBlock>
+
+        <!-- Override the product list template -->
+        <referenceBlock name="category.products.list">
+            <action method="setTemplate">
+                <argument name="template" xsi:type="string">Madar_StockAvailability::product/list.phtml</argument>
+            </action>
+        </referenceBlock>
     </body>
 </page>
