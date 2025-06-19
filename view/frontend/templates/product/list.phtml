@@ -38,6 +38,11 @@ $productCollection = $block->getLoadedProductCollection();
                     return true;
                 }
 
+                // Show while loading to prevent flashing
+                if (store.isLoading) {
+                    return true;
+                }
+
                 return store.isDeliverable(this.sku);
             },
 
@@ -60,6 +65,28 @@ $productCollection = $block->getLoadedProductCollection();
         <div><?= $escaper->escapeHtml(__('We can\'t find products matching the selection.')) ?></div>
     </div>
 <?php else: ?>
+    <!-- Add this before the product list -->
+    <div x-data="{ 
+    get hiddenCount() {
+        if (!Alpine.store('deliverability')?.hideUndeliverable || !Alpine.store('deliverability')?.selected_source_code) {
+            return 0;
+        }
+        const products = document.querySelectorAll('[data-product-sku]');
+        let hidden = 0;
+        products.forEach(el => {
+            const sku = el.getAttribute('data-product-sku');
+            if (!Alpine.store('deliverability').isDeliverable(sku)) {
+                hidden++;
+            }
+        });
+        return hidden;
+    }
+}" x-show="hiddenCount > 0" class="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+        <p class="text-sm text-yellow-800">
+            <span x-text="hiddenCount"></span> <?= $escaper->escapeHtml(__('undeliverable items are hidden.')) ?>
+            <?= $escaper->escapeHtml(__('Some items from other pages might be deliverable.')) ?>
+        </p>
+    </div>
     <section class="py-8" id="product-list" aria-label="<?= $escaper->escapeHtmlAttr(__('Product list')) ?>" tabindex="-1">
         <?= $block->getToolbarHtml() ?>
         <?= $block->getAdditionalHtml() ?>
@@ -89,7 +116,7 @@ $productCollection = $block->getLoadedProductCollection();
                     <li class="flex flex-col"
                         x-data="productVisibility('<?= $escaper->escapeJs($product->getSku()) ?>')"
                         x-show="isVisible"
-                        x-transition>
+                        x-transition data-product-sku="<?= $escaper->escapeHtmlAttr($product->getSku()) ?>">
                         <?= $productListItemViewModel->getItemHtml(
                             $product,
                             $block,

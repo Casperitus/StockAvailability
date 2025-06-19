@@ -29,8 +29,11 @@
 				selected_source_code: "", // This will be updated by the effect watcher
 				isLoading: false,
 				error: null,
+				// Default to true (on) and properly handle localStorage
 				hideUndeliverable:
-					localStorage.getItem("hideUndeliverable") === "true" || false,
+					localStorage.getItem("hideUndeliverable") !== null
+						? localStorage.getItem("hideUndeliverable") === "true"
+						: true, // Default to true
 				isDeliverable(sku) {
 					return this.map[sku] === "Yes";
 				},

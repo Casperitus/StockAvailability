@@ -83,6 +83,20 @@ function mapComponent(_hyvaData) {
 			Alpine.store("mapComponentInstance", this); // From newer versions
 			this.fetchDeliveryBranchData(); // Fetch initial branch data (common to both)
 
+			// Watch for saved addresses to be loaded
+			if (this._isLoggedIn && !this.selectedSourceCode) {
+				this.$watch("savedAddresses", (newAddresses) => {
+					if (
+						newAddresses.length > 0 &&
+						!this.selectedSourceCode &&
+						!this._hasAutoSelected
+					) {
+						this._hasAutoSelected = true;
+						this.checkAndAutoSelectDefaultAddress();
+					}
+				});
+			}
+
 			// Event listener setup (common pattern)
 			if (!window.mapCompPrivateContentLoaded) {
 				// Use a unique flag
