@@ -22,51 +22,17 @@ $eagerLoadImagesCount = (int) ($block->getData('eager_load_images_count') ?? 3);
 $productCollection = $block->getLoadedProductCollection();
 ?>
 
-<script>
-    // Product visibility controller
-    function productVisibility(sku) {
-        return {
-            sku: sku,
-
-            get isVisible() {
-                const store = Alpine.store('deliverability');
-                if (!store || !store.hideUndeliverable) {
-                    return true;
-                }
-
-                if (!store.selected_source_code) {
-                    return true;
-                }
-
-                // Show while loading to prevent flashing
-                if (store.isLoading) {
-                    return true;
-                }
-
-                return store.isDeliverable(this.sku);
-            },
-
-            init() {
-                DeliverabilityService.registerSku(this.sku);
-
-                // Re-evaluate visibility when filter changes
-                window.addEventListener('deliverability-filter-changed', () => {
-                    this.$nextTick(() => {
-                        // Force Alpine to re-evaluate
-                    });
-                });
-            }
-        }
-    }
-</script>
+<?php // REMOVED: The custom 'productVisibility' script is no longer needed. 
+?>
 
 <?php if (!$productCollection->count()): ?>
     <div class="message info empty">
         <div><?= $escaper->escapeHtml(__('We can\'t find products matching the selection.')) ?></div>
     </div>
 <?php else: ?>
-    <!-- Add this before the product list -->
-    <div x-data="{ 
+    <?php // This block for showing the hidden count is fine and requires no changes. 
+    ?>
+    <div x-data="{
     get hiddenCount() {
         if (!Alpine.store('deliverability')?.hideUndeliverable || !Alpine.store('deliverability')?.selected_source_code) {
             return 0;
@@ -81,12 +47,13 @@ $productCollection = $block->getLoadedProductCollection();
         });
         return hidden;
     }
-}" x-show="hiddenCount > 0" class="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+}" x-show="hiddenCount > 0" class="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md" style="display: none;">
         <p class="text-sm text-yellow-800">
             <span x-text="hiddenCount"></span> <?= $escaper->escapeHtml(__('undeliverable items are hidden.')) ?>
             <?= $escaper->escapeHtml(__('Some items from other pages might be deliverable.')) ?>
         </p>
     </div>
+
     <section class="py-8" id="product-list" aria-label="<?= $escaper->escapeHtmlAttr(__('Product list')) ?>" tabindex="-1">
         <?= $block->getToolbarHtml() ?>
         <?= $block->getAdditionalHtml() ?>
@@ -113,10 +80,17 @@ $productCollection = $block->getLoadedProductCollection();
                         $product->setData('image_custom_attributes', ['loading' => 'eager', 'fetchpriority' => 'high']);
                     }
                     ?>
+
+                    <?php // UPDATED: The Alpine.js directives are now simpler and more direct. 
+                    ?>
                     <li class="flex flex-col"
-                        x-data="productVisibility('<?= $escaper->escapeJs($product->getSku()) ?>')"
-                        x-show="isVisible"
-                        x-transition data-product-sku="<?= $escaper->escapeHtmlAttr($product->getSku()) ?>">
+                        x-data="{ sku: '<?= $escaper->escapeJs($product->getSku()) ?>' }"
+                        x-init="DeliverabilityService.registerSku(sku)"
+                        x-show="!($store.deliverability.hideUndeliverable && !$store.deliverability.isDeliverable(sku))"
+                        x-cloak
+                        x-transition
+                        data-product-sku="<?= $escaper->escapeHtmlAttr($product->getSku()) ?>">
+
                         <?= $productListItemViewModel->getItemHtml(
                             $product,
                             $block,

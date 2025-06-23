@@ -12,13 +12,12 @@
 	const RETRY_DELAY = 1000;
 
 	function initService() {
-		// Renamed from initWatcher for clarity
 		if (watcherInitialized) return;
 		watcherInitialized = true;
 
 		document.addEventListener("alpine:init", () => {
 			initializeDeliverabilityStore();
-			setupSourceCodeEffectWatcher(); // The core reactive mechanism
+			setupSourceCodeEffectWatcher();
 		});
 	}
 
@@ -26,20 +25,19 @@
 		if (!Alpine.store("deliverability")) {
 			Alpine.store("deliverability", {
 				map: {},
-				selected_source_code: "", // This will be updated by the effect watcher
+				selected_source_code: "",
 				isLoading: false,
 				error: null,
-				// Default to true (on) and properly handle localStorage
 				hideUndeliverable:
 					localStorage.getItem("hideUndeliverable") !== null
 						? localStorage.getItem("hideUndeliverable") === "true"
-						: true, // Default to true
+						: true, // Default to true (on)
 				isDeliverable(sku) {
 					return this.map[sku] === "Yes";
 				},
 				getStatus(sku) {
 					return this.map[sku] || "Yes";
-				}, // Default to Yes if not found
+				},
 				hasData(sku) {
 					return this.map.hasOwnProperty(sku);
 				},
@@ -50,27 +48,21 @@
 				clearError() {
 					this.error = null;
 				},
+				// UPDATED: This function is now simplified.
 				savePreference() {
 					localStorage.setItem("hideUndeliverable", this.hideUndeliverable);
-					// Trigger visibility update
-					this.updateProductVisibility();
+					// With a reactive x-show on the product list, dispatching an
+					// event is no longer necessary. Alpine's reactivity handles the update automatically.
 				},
-				updateProductVisibility() {
-					// Dispatch custom event that product listings can listen to
-					window.dispatchEvent(
-						new CustomEvent("deliverability-filter-changed", {
-							detail: { hideUndeliverable: this.hideUndeliverable },
-						})
-					);
-				},
+				// REMOVED: The updateProductVisibility function is no longer needed.
 			});
 		}
-		// Initial check on page load based on what customerData might already have
+
 		const initialSource =
 			Alpine.store("customerData")?.data?.["delivery-branch"]
 				?.selected_source_code || "";
 
-		processSourceCodeChange(initialSource); // Process initial state
+		processSourceCodeChange(initialSource);
 	}
 
 	function setupSourceCodeEffectWatcher() {
@@ -87,7 +79,6 @@
 		});
 	}
 
-	// Central logic to handle a source code change
 	function processSourceCodeChange(currentSourceCode) {
 		const store = Alpine.store("deliverability");
 
@@ -96,15 +87,13 @@
 			return;
 		}
 
-		// Update the deliverability store's own record of the source code
 		store.selected_source_code = currentSourceCode;
 
 		if (currentSourceCode === previousSourceCode) {
 			return;
 		}
 
-		const oldPreviousForLog = previousSourceCode;
-		previousSourceCode = currentSourceCode; // Update the module-level processed source
+		previousSourceCode = currentSourceCode;
 		store.clearError();
 
 		if (!currentSourceCode || !currentSourceCode.trim()) {
@@ -112,21 +101,20 @@
 			return;
 		}
 
-		deliverableMap = {}; // Reset internal cache
-		store.map = {}; // Reset store's map
+		deliverableMap = {};
+		store.map = {};
 
 		if (watchedSkus.size > 0) {
 			fetchData(currentSourceCode, Array.from(watchedSkus));
-		} else {
 		}
 	}
 
 	function setAllWatchedSkusToDefault() {
 		const newMap = {};
 		watchedSkus.forEach((sku) => {
-			newMap[sku] = "Yes"; // Default to deliverable
+			newMap[sku] = "Yes";
 		});
-		deliverableMap = { ...newMap }; // Update internal map
+		deliverableMap = { ...newMap };
 		const store = Alpine.store("deliverability");
 		if (store) {
 			store.map = { ...deliverableMap };
@@ -134,7 +122,6 @@
 	}
 
 	async function fetchData(sourceCode, skus, retryCount = 0) {
-		// Safeguards (though processSourceCodeChange should prevent empty source/skus)
 		if (!Array.isArray(skus) || skus.length === 0) return;
 		if (!sourceCode || !sourceCode.trim()) {
 			setAllWatchedSkusToDefault();
@@ -205,12 +192,12 @@
 			);
 			if (retryCount < RETRY_ATTEMPTS - 1) {
 				await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY));
-				return performFetchLogic(sourceCode, skus, retryCount + 1); // Recursive call for retry
+				return performFetchLogic(sourceCode, skus, retryCount + 1);
 			} else {
 				console.error(
 					`[DService_FETCH_FAIL_FINAL] All retries for '${sourceCode}'. Defaulting these SKUs.`
 				);
-				defaultSpecificSkus(skus); // Default only the SKUs from this failed request
+				defaultSpecificSkus(skus);
 				store?.setError(`Failed to fetch: ${error.message}`);
 			}
 		}
@@ -233,7 +220,7 @@
 			console.warn(
 				"[DService_MAP] Invalid API response data, defaulting requested SKUs."
 			);
-			defaultSpecificSkus(requestedSkus); // Default only the SKUs that were part of this request
+			defaultSpecificSkus(requestedSkus);
 			return;
 		}
 
@@ -247,22 +234,18 @@
 
 		requestedSkus.forEach((sku) => {
 			if (!processedInResponse.has(sku)) {
-				// console.warn(`[DService_MAP] No data for SKU: ${sku} in response, defaulting to Yes.`);
-				deliverableMap[sku] = "Yes"; // Default missing SKUs from this batch
+				deliverableMap[sku] = "Yes";
 				localChanges[sku] = "Yes";
 			}
 		});
 
 		const store = Alpine.store("deliverability");
 		if (store) {
-			// Merge changes into the store map to preserve existing data for other SKUs
-			// and ensure reactivity for the updated ones.
 			store.map = { ...store.map, ...localChanges };
 		}
 	}
 
 	function defaultSpecificSkus(skusToDefault) {
-		// For defaulting only specific SKUs on error
 		const localChanges = {};
 		skusToDefault.forEach((sku) => {
 			deliverableMap[sku] = "Yes";
@@ -281,13 +264,10 @@
 
 		const store = Alpine.store("deliverability");
 		if (isNewWatch) {
-			// Only process if it's a genuinely new SKU to the watched set
 			if (!deliverableMap.hasOwnProperty(sku)) {
-				// If no data exists yet (e.g. first time seeing this SKU)
-				deliverableMap[sku] = "Yes"; // Default it
-				if (store) store.map = { ...store.map, [sku]: "Yes" }; // Update store reactively
+				deliverableMap[sku] = "Yes";
+				if (store) store.map = { ...store.map, [sku]: "Yes" };
 			}
-			// If a source code is active, fetch for this newly registered SKU
 			if (
 				store &&
 				store.selected_source_code &&
@@ -330,13 +310,15 @@
 	}
 
 	window.DeliverabilityService = {
-		initService, // Renamed
+		initService,
 		isDeliverable: (sku) => deliverableMap[sku] === "Yes",
 		registerSku,
 		registerSkus,
-		// notifySourceCodeChanged is REMOVED as we revert to effect-driven
 		refreshData: () => {
-			/* ... unchanged ... */
+			const store = Alpine.store("deliverability");
+			if (store?.selected_source_code && watchedSkus.size > 0) {
+				fetchData(store.selected_source_code, Array.from(watchedSkus));
+			}
 		},
 	};
 	initService();
