@@ -28,4 +28,18 @@
         <plugin name="madar_source_repository_plugin" type="Madar\StockAvailability\Plugin\SourceRepositoryPlugin" />
     </type>
 
+    <!-- Plugin for saving delivery data to orders -->
+    <type name="Magento\Sales\Api\OrderRepositoryInterface">
+        <plugin name="madar_save_delivery_data_to_order" type="Madar\StockAvailability\Plugin\Sales\OrderRepositoryPlugin" sortOrder="10" />
+    </type>
+
+    <!-- Console command -->
+    <type name="Magento\Framework\Console\CommandList">
+        <arguments>
+            <argument name="commands" xsi:type="array">
+                <item name="madar_migrate_delivery_data" xsi:type="object">Madar\StockAvailability\Console\Command\MigrateDeliveryData</item>
+            </argument>
+        </arguments>
+    </type>
+
 </config>

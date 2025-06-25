@@ -9,25 +9,30 @@ $order = $block->getOrder();
 $shippingAddress = $order ? $order->getShippingAddress() : null;
 $latitude = $shippingAddress ? $shippingAddress->getData('latitude') : null;
 $longitude = $shippingAddress ? $shippingAddress->getData('longitude') : null;
+
+// Get source information
+$sourceCode = $block->getAssignedSourceCode();
+$branchPhone = $block->getDeliveryBranchPhone();
 ?>
 
-<?php if ($latitude && $longitude): ?>
-    <div class="admin__page-section-item order-delivery-info" style="margin-top: 15px; border-top: 1px solid #ccc; padding-top: 15px;">
-        <div class="admin__page-section-item-title">
-            <span class="title"><?= $block->escapeHtml(__('Delivery Location')) ?></span>
-        </div>
-        <div class="admin__page-section-item-content">
-            <p>
-                <?= $block->escapeHtml(__('Latitude')) ?>: <?= $block->escapeHtml($latitude) ?><br />
-                <?= $block->escapeHtml(__('Longitude')) ?>: <?= $block->escapeHtml($longitude) ?>
-            </p>
-            <p>
-                <a href="<?= $block->escapeUrl($block->getGoogleMapsUrl($latitude, $longitude)) ?>"
-                    target="_blank"
-                    style="color: #007bdb; text-decoration: none;">
-                    <?= $block->escapeHtml(__('View on Google Maps')) ?>
-                </a>
-            </p>
-        </div>
-    </div>
+<?php if (($latitude && $longitude) || $sourceCode): ?>
+    <?php if ($sourceCode): ?>
+        <tr>
+            <th><?= $block->escapeHtml(__('Source Code')) ?></th>
+            <td><?= $block->escapeHtml($sourceCode) ?></td>
+        </tr>
+        <tr>
+            <th><?= $block->escapeHtml(__('Source Contact')) ?></th>
+            <td><?= $block->escapeHtml($branchPhone) ?></td>
+        </tr>
+    <?php endif; ?>
+    <?php if ($latitude && $longitude): ?>
+        <tr>
+            <th><?= $block->escapeHtml(__('Customer Delivery Location')) ?></th>
+            <td><a href="<?= $block->escapeUrl($block->getGoogleMapsUrl($latitude, $longitude)) ?>"
+                    target="_blank">
+                    <?= $block->escapeHtml(__('View Source on Google Maps')) ?>
+                </a></td>
+        </tr>
+    <?php endif; ?>
 <?php endif; ?>
