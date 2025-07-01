@@ -1,0 +1,202 @@
+<?php
+/** @var \Madar\StockAvailability\Block\GoogleMaps $block */
+$product = $block->getProduct();
+$sourcesData = $block->getAllSourcesWithHubs();
+?>
+
+<div x-data="storeAvailabilityComponent()" x-init="init()" class="store-availability-section border-t pt-6 mt-6">
+    <h3 class="text-lg font-semibold mb-4"><?= $escaper->escapeHtml(__('Check availability at stores near you')) ?></h3>
+    
+    <!-- Location Input -->
+    <div class="mb-4">
+        <label for="store-location-search" class="block text-sm font-medium text-gray-700 mb-2">
+            <?= $escaper->escapeHtml(__('Enter your location')) ?>
+        </label>
+        <div class="flex gap-2">
+            <input
+                type="text"
+                id="store-location-search"
+                x-ref="locationInput"
+                @input="onLocationInput($event)"
+                placeholder="<?= $escaper->escapeHtmlAttr(__('Enter city or postal code')) ?>"
+                class="flex-1 form-input border border-gray-300 rounded-md px-3 py-2"
+            />
+            <button
+                @click="useCurrentLocation()"
+                class="btn btn-secondary px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+                type="button">
+                <?= $escaper->escapeHtml(__('Use Current Location')) ?>
+            </button>
+        </div>
+    </div>
+
+    <!-- Store List -->
+    <div x-show="nearbyStores.length > 0" class="space-y-3">
+        <h4 class="font-medium text-gray-900"><?= $escaper->escapeHtml(__('Nearby Stores')) ?></h4>
+        <template x-for="store in nearbyStores" :key="store.source_code">
+            <div class="border rounded-lg p-4 bg-gray-50">
+                <div class="flex justify-between items-start">
+                    <div class="flex-1">
+                        <h5 class="font-medium text-gray-900" x-text="store.source_name"></h5>
+                        <p class="text-sm text-gray-600" x-text="store.address"></p>
+                        <p class="text-sm text-gray-600" x-text="store.phone"></p>
+                        <p class="text-sm text-gray-500" x-text="store.distance + ' km away'"></p>
+                    </div>
+                    <div class="text-right">
+                        <div 
+                            class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium"
+                            :class="store.available ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'">
+                            <span x-text="store.available ? '<?= $escaper->escapeJs(__('In Stock')) ?>' : '<?= $escaper->escapeJs(__('Out of Stock')) ?>'"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </template>
+    </div>
+
+    <!-- No Results Message -->
+    <div x-show="searchPerformed && nearbyStores.length === 0" class="text-center py-6 text-gray-500">
+        <p><?= $escaper->escapeHtml(__('No stores found in your area.')) ?></p>
+    </div>
+</div>
+
+<script>
+function storeAvailabilityComponent() {
+    return {
+        nearbyStores: [],
+        searchPerformed: false,
+        isLoading: false,
+        
+        init() {
+            this.initAutocomplete();
+        },
+        
+        initAutocomplete() {
+            if (typeof google !== 'undefined' && google.maps && google.maps.places) {
+                const input = this.$refs.locationInput;
+                const autocomplete = new google.maps.places.Autocomplete(input, {
+                    componentRestrictions: { country: 'sa' },
+                    fields: ['geometry', 'formatted_address']
+                });
+                
+                autocomplete.addListener('place_changed', () => {
+                    const place = autocomplete.getPlace();
+                    if (place.geometry) {
+                        this.searchNearbyStores(
+                            place.geometry.location.lat(),
+                            place.geometry.location.lng()
+                        );
+                    }
+                });
+            }
+        },
+        
+        async searchNearbyStores(lat, lng) {
+            this.isLoading = true;
+            this.searchPerformed = true;
+            
+            try {
+                // Get stores data from your existing helper
+                const sourcesData = <?= json_encode($sourcesData) ?>;
+                const productSku = '<?= $escaper->escapeJs($product->getSku()) ?>';
+                
+                // Calculate distances and check availability
+                const storesWithDistance = sourcesData.map(store => {
+                    const distance = this.calculateDistance(lat, lng, store.latitude, store.longitude);
+                    return {
+                        ...store,
+                        distance: Math.round(distance * 10) / 10,
+                        address: `${store.street || ''}, ${store.city || ''}`.trim().replace(/^,\s*/, '')
+                    };
+                });
+                
+                // Sort by distance and take closest 5
+                const nearbyStores = storesWithDistance
+                    .filter(store => store.distance <= 50) // 50km radius
+                    .sort((a, b) => a.distance - b.distance)
+                    .slice(0, 5);
+                
+                // Check availability for each store
+                if (nearbyStores.length > 0) {
+                    const availability = await this.checkStoreAvailability(productSku, nearbyStores.map(s => s.source_code));
+                    
+                    this.nearbyStores = nearbyStores.map(store => ({
+                        ...store,
+                        available: availability[store.source_code] === 'Yes'
+                    }));
+                } else {
+                    this.nearbyStores = [];
+                }
+                
+            } catch (error) {
+                console.error('Error searching stores:', error);
+                this.nearbyStores = [];
+            } finally {
+                this.isLoading = false;
+            }
+        },
+        
+        async checkStoreAvailability(sku, sourceCodes) {
+            try {
+                const params = new URLSearchParams();
+                params.append('skus[]', sku);
+                sourceCodes.forEach(code => params.append('source_codes[]', code));
+                
+                const response = await fetch(`/stockavailability/deliverability/get?${params}`, {
+                    method: 'GET',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                });
+                
+                const data = await response.json();
+                const availability = {};
+                
+                if (data.success && data.data) {
+                    data.data.forEach(item => {
+                        if (item.source_code) {
+                            availability[item.source_code] = item.deliverable;
+                        }
+                    });
+                }
+                
+                return availability;
+            } catch (error) {
+                console.error('Error checking availability:', error);
+                return {};
+            }
+        },
+        
+        calculateDistance(lat1, lng1, lat2, lng2) {
+            const R = 6371;
+            const dLat = this.deg2rad(lat2 - lat1);
+            const dLng = this.deg2rad(lng2 - lng1);
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(this.deg2rad(lat1)) * Math.cos(this.deg2rad(lat2)) *
+                Math.sin(dLng/2) * Math.sin(dLng/2);
+            return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+        },
+        
+        deg2rad(deg) {
+            return deg * (Math.PI/180);
+        },
+        
+        useCurrentLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        this.searchNearbyStores(
+                            position.coords.latitude,
+                            position.coords.longitude
+                        );
+                    },
+                    (error) => {
+                        console.error('Geolocation error:', error);
+                        alert('Unable to get your location. Please enter your location manually.');
+                    }
+                );
+            } else {
+                alert('Geolocation is not supported by this browser.');
+            }
+        }
+    };
+}
+</script>

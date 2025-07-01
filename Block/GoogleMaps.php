@@ -74,7 +74,25 @@ class GoogleMaps extends Template
             \Magento\Store\Model\ScopeInterface::SCOPE_STORE
         );
     }
+    /**
+     * Get all sources with hubs for store availability
+     *
+     * @return array
+     */
+    public function getAllSourcesWithHubs()
+    {
+        return $this->stockHelper->getAllSourcesWithHubs();
+    }
 
+    /**
+     * Get current product
+     *
+     * @return \Magento\Catalog\Model\Product|null
+     */
+    public function getProduct()
+    {
+        return $this->registry->registry('current_product');
+    }
     public function getProductSku()
     {
         $product = $this->registry->registry('current_product');

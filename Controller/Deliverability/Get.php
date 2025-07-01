@@ -36,6 +36,7 @@ class Get extends Action
 
         $skus = (array) $this->request->getParam('skus', []);
         $sourceCode = $this->request->getParam('source_code', null);
+        $sourceCodes = (array) $this->request->getParam('source_codes', []); // Add this line
 
         if (empty($skus)) {
             return $result->setData([
@@ -46,21 +47,36 @@ class Get extends Action
 
         try {
             $deliverabilityData = [];
-            foreach ($skus as $sku) {
-                // 1) If no source code is provided, default deliverable = true (Yes)
-                $isDeliverable = true;
-                if ($sourceCode) {
-                    $isDeliverable = $this->stockHelper->isProductDeliverable($sku, $sourceCode);
+
+            // Handle multiple source codes for store availability check
+            if (!empty($sourceCodes)) {
+                foreach ($skus as $sku) {
+                    foreach ($sourceCodes as $code) {
+                        $isDeliverable = $this->stockHelper->isProductDeliverable($sku, $code);
+                        $deliverabilityData[] = [
+                            'sku' => $sku,
+                            'source_code' => $code,
+                            'deliverable' => $isDeliverable ? 'Yes' : 'No'
+                        ];
+                    }
                 }
-                $deliverabilityData[] = [
-                    'sku'         => $sku,
-                    'deliverable' => $isDeliverable ? 'Yes' : 'No'
-                ];
+            } else {
+                // Original logic for single source
+                foreach ($skus as $sku) {
+                    $isDeliverable = true;
+                    if ($sourceCode) {
+                        $isDeliverable = $this->stockHelper->isProductDeliverable($sku, $sourceCode);
+                    }
+                    $deliverabilityData[] = [
+                        'sku' => $sku,
+                        'deliverable' => $isDeliverable ? 'Yes' : 'No'
+                    ];
+                }
             }
 
             return $result->setData([
                 'success' => true,
-                'data'    => $deliverabilityData
+                'data' => $deliverabilityData
             ]);
         } catch (\Exception $e) {
             return $result->setData([
