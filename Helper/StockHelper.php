@@ -125,7 +125,33 @@ class StockHelper extends AbstractHelper
 
         return $inventoryData;
     }
+    /**
+     * Get all sources with enhanced address information
+     *
+     * @return array
+     */
+    public function getAllSourcesWithAddresses(): array
+    {
+        $sources = $this->getAllSourcesWithHubs();
 
+        foreach ($sources as &$source) {
+            // Get full source details from repository for better address info
+            try {
+                $sourceDetails = $this->sourceRepository->get($source['source_code']);
+                $source['street'] = is_array($sourceDetails->getStreet())
+                    ? implode(', ', $sourceDetails->getStreet())
+                    : ($sourceDetails->getStreet() ?: '');
+                $source['city'] = $sourceDetails->getCity() ?: '';
+                $source['region'] = $sourceDetails->getRegion() ?: '';
+                $source['postcode'] = $sourceDetails->getPostcode() ?: '';
+                $source['country_id'] = $sourceDetails->getCountryId() ?: '';
+            } catch (\Exception $e) {
+                // Keep existing source data if detailed fetch fails
+            }
+        }
+
+        return $sources;
+    }
     /**
      * Fetch all products data at once (optimized).
      */
