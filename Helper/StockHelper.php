@@ -229,7 +229,81 @@ class StockHelper extends AbstractHelper
 
         return array_unique($deliverableSkus);
     }
+    /**
+     * Check if product is actually in stock at the specific source (not including hubs)
+     *
+     * @param string $sku
+     * @param string $sourceCode
+     * @return bool
+     */
+    public function isProductInStockAtSpecificSource(string $sku, string $sourceCode): bool
+    {
+        try {
+            // Check cache first
+            $cacheKey = 'stock_' . $sku . '_' . $sourceCode;
+            if (isset($this->stockCache[$cacheKey])) {
+                return $this->stockCache[$cacheKey];
+            }
 
+            // For NATIONWIDE_SHIPPING, we don't check stock
+            if ($sourceCode === 'NATIONWIDE_SHIPPING') {
+                return false;
+            }
+
+            // Check if product exists
+            $product = $this->productRepository->get($sku);
+
+            // Check if it's a grouped or configurable product
+            if (in_array($product->getTypeId(), [Configurable::TYPE_CODE, Grouped::TYPE_CODE])) {
+                $childSkus = $this->getChildSkus($product);
+                foreach ($childSkus as $childSku) {
+                    if ($this->isProductInStockAtSource($childSku, $sourceCode)) {
+                        $this->stockCache[$cacheKey] = true;
+                        return true;
+                    }
+                }
+                $this->stockCache[$cacheKey] = false;
+                return false;
+            }
+
+            // For simple products, check direct stock at source
+            $isInStock = $this->isProductInStockAtSource($sku, $sourceCode);
+            $this->stockCache[$cacheKey] = $isInStock;
+            return $isInStock;
+        } catch (\Exception $e) {
+            $this->logger->error("[StockHelper] Error checking stock at specific source: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Get detailed stock status for a product
+     * Returns: 'in_stock', 'backorder', or 'out_of_stock'
+     *
+     * @param string $sku
+     * @param string $sourceCode
+     * @return string
+     */
+    public function getProductStockStatus(string $sku, string $sourceCode): string
+    {
+        try {
+            // First check if it's in stock at the specific source
+            if ($this->isProductInStockAtSpecificSource($sku, $sourceCode)) {
+                return 'in_stock';
+            }
+
+            // If not in stock locally, check if it's deliverable (from hubs)
+            if ($this->isProductDeliverable($sku, $sourceCode)) {
+                return 'backorder';
+            }
+
+            // Neither in stock nor deliverable
+            return 'out_of_stock';
+        } catch (\Exception $e) {
+            $this->logger->error("[StockHelper] Error getting stock status: " . $e->getMessage());
+            return 'out_of_stock';
+        }
+    }
 
     /**
      * Retrieves all inventory sources with their associated hubs.

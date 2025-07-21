@@ -64,9 +64,15 @@ class Availability extends Action
                 // Check if product is deliverable/available at this source
                 $isAvailable = $this->stockHelper->isProductDeliverable($sku, $source['source_code']);
 
-                $this->logger->info("Store: {$source['source_name']}, SKU: {$sku}, Available: " . ($isAvailable ? 'Yes' : 'No'));
+                // Get detailed stock status
+                $stockStatus = 'out_of_stock';
+                if ($isAvailable) {
+                    // Check if it's actually in stock at this specific source
+                    $isInStock = $this->stockHelper->isProductInStockAtSpecificSource($sku, $source['source_code']);
+                    $stockStatus = $isInStock ? 'in_stock' : 'backorder';
+                }
 
-                // Only include if product is available
+                // Only include if product is available (either in stock or backorder)
                 if ($isAvailable) {
                     $availableStores[] = [
                         'source_code' => $source['source_code'],
@@ -76,29 +82,26 @@ class Availability extends Action
                         'longitude' => $source['longitude'],
                         'distance' => round($distance, 1),
                         'address' => $this->formatAddress($source),
-                        'delivery_range_km' => $source['delivery_range_km']
+                        'delivery_range_km' => $source['delivery_range_km'],
+                        'stock_status' => $stockStatus // Add this new field
                     ];
                 }
             }
 
             // Sort by distance
-            usort($availableStores, function($a, $b) {
+            usort($availableStores, function ($a, $b) {
                 return $a['distance'] <=> $b['distance'];
             });
 
             // Limit to top 10
             $availableStores = array_slice($availableStores, 0, 10);
 
-            $this->logger->info("Found " . count($availableStores) . " available stores for SKU: {$sku}");
-
             return $result->setData([
                 'success' => true,
                 'stores' => $availableStores,
                 'total_found' => count($availableStores)
             ]);
-
         } catch (\Exception $e) {
-            $this->logger->error('Store availability error: ' . $e->getMessage());
             return $result->setData([
                 'success' => false,
                 'message' => 'Error finding available stores: ' . $e->getMessage()
@@ -113,11 +116,11 @@ class Availability extends Action
         $dLat = deg2rad($lat2 - $lat1);
         $dLng = deg2rad($lng2 - $lng1);
 
-        $a = sin($dLat/2) * sin($dLat/2) +
-             cos(deg2rad($lat1)) * cos(deg2rad($lat2)) *
-             sin($dLng/2) * sin($dLng/2);
+        $a = sin($dLat / 2) * sin($dLat / 2) +
+            cos(deg2rad($lat1)) * cos(deg2rad($lat2)) *
+            sin($dLng / 2) * sin($dLng / 2);
 
-        $c = 2 * atan2(sqrt($a), sqrt(1-$a));
+        $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
 
         return $earthRadius * $c;
     }
@@ -125,7 +128,7 @@ class Availability extends Action
     private function formatAddress($source)
     {
         $parts = [];
-        
+
         if (!empty($source['street'])) {
             $parts[] = $source['street'];
         }

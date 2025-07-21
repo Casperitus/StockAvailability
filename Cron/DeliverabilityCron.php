@@ -20,7 +20,6 @@ class DeliverabilityCron
 
     public function execute()
     {
-        $this->logger->info('Madar_StockAvailability Deliverability Cron Job Started.');
 
         try {
             $this->resetDeliverabilityData();
@@ -35,7 +34,6 @@ class DeliverabilityCron
 
             foreach ($sources as $source) {
                 $mainSourceCode = $source['source_code'];
-                $this->logger->info("Processing Main Source: {$mainSourceCode}");
 
                 $deliverableSkus = $this->stockHelper->calculateDeliverableSkus(
                     $allSkus,
@@ -51,8 +49,6 @@ class DeliverabilityCron
             }
 
             $this->stockHelper->cleanupDeletedDeliverabilityData();
-
-            $this->logger->info('Deliverability Cron Job Completed.');
         } catch (\Exception $e) {
             $this->logger->error('Error: ' . $e->getMessage());
         }
@@ -64,6 +60,5 @@ class DeliverabilityCron
         $connection = $this->stockHelper->getResourceConnection()->getConnection();
         $tableName = $connection->getTableName('madar_product_deliverability');
         $connection->update($tableName, ['deleted' => 1], 'deleted = 0');
-        $this->logger->info("Deliverability data marked as deleted.");
     }
 }

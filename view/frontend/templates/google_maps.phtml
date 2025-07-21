@@ -10,7 +10,33 @@ if (!$hyvaData || !isset($hyvaData['apiKey']) || empty($hyvaData['apiKey'])) {
     return;
 }
 ?>
+<script>
+    // -------- One-time loader, shared by every component --------
+    (function() {
+        if (window.google && window.google.maps) {
+            /* already loaded on this page (FPC / other block) */
+            window._mapsApiReady = Promise.resolve(window.google.maps);
+            return;
+        }
 
+        if (!window._mapsApiReady) {
+            window._mapsApiReady = new Promise(function(resolve, reject) {
+                window.__onGoogleMapsReady = function() {
+                    resolve(window.google.maps);
+                };
+                const s = document.createElement('script');
+                s.src = 'https://maps.googleapis.com/maps/api/js' +
+                    '?key=<?= $hyvaData['apiKey'] ?>' +
+                    '&libraries=places' +
+                    '&callback=__onGoogleMapsReady';
+                s.async = true;
+                s.defer = true;
+                s.onerror = reject;
+                document.head.appendChild(s);
+            });
+        }
+    })();
+</script>
 <script>
     window.hyva = window.hyva || {};
     // Pass server-side data with validation
@@ -82,7 +108,7 @@ if (!$hyvaData || !isset($hyvaData['apiKey']) || empty($hyvaData['apiKey'])) {
                     <h2 id="modal-title" class="text-xl font-semibold mb-4"
                         x-text="showSavedAddresses ? '<?= $escaper->escapeJs(__('Select Delivery Address')) ?>' : '<?= $escaper->escapeJs(__('Set Delivery Location')) ?>'">
                     </h2>
-                    
+
                     <!-- Replace the existing toggle section with this improved version -->
                     <div x-show="selectedSourceCode" class="mb-4 p-3 bg-gray-50 rounded-md">
                         <div class="flex items-center justify-between">

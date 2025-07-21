@@ -1,4 +1,4 @@
-<csp_whitelist xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Csp:etc/csp_whitelist.xsd">
+<csp_whitelist xmlns:xsi="http://www.w3.org/2001/2001-XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Csp:etc/csp_whitelist.xsd">
     <policies>
         <policy id="script-src">
             <values>
@@ -44,7 +44,9 @@
                 <value id="self" type="host">'self'</value>
                 <value id="google-analytics-connect" type="host">www.google-analytics.com</value>
                 <value id="ahrefs-connect" type="host">analytics.ahrefs.com</value>
-            </values>
+                <value id="facebook-connect-api" type="host">connect.facebook.net</value>
+                <value id="facebook-www" type="host">www.facebook.com</value>
+                </values>
         </policy>
     </policies>
 </csp_whitelist>

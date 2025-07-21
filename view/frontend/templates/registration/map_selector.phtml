@@ -82,27 +82,18 @@ $hyvaData = $block->prepareHyvaData();
                 }
                 this.loadGoogleMapsApi();
             },
-
             loadGoogleMapsApi() {
-                // Check if already loaded
-                if (typeof google !== 'undefined' && google.maps) {
-                    this.googleMapsApiLoaded = true;
-                    this.initMap();
-                    return;
+                /* Wait for the global loader declared in google_maps.phtml */
+                if (window._mapsApiReady) {
+                    window._mapsApiReady.then(() => {
+                        this.googleMapsApiLoaded = true;
+                        this.initMap();
+                    }).catch((e) => {
+                        console.error('[RegMap] Google Maps failed to load', e);
+                    });
+                } else {
+                    console.error('[RegMap] _mapsApiReady promise not found – did you remove the global loader?');
                 }
-
-                // Create callback
-                window.initRegistrationMap = () => {
-                    this.googleMapsApiLoaded = true;
-                    this.initMap();
-                };
-
-                // Load script
-                const script = document.createElement('script');
-                script.src = `https://maps.googleapis.com/maps/api/js?key=${window.registrationMapData.apiKey}&libraries=places&callback=initRegistrationMap`;
-                script.async = true;
-                script.defer = true;
-                document.head.appendChild(script);
             },
 
             initMap() {

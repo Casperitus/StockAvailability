@@ -29,10 +29,10 @@
                 </arguments>
             </block>
         </referenceContainer>
-        <!-- Product Avaliabilty 
+        <!-- Product Avaliabilty -->
         <referenceContainer name="product.info.additional">
             <block class="Madar\StockAvailability\Block\GoogleMaps" name="product.store.availability" template="Madar_StockAvailability::product/store-availability.phtml" after="-" />
-        </referenceContainer> -->
+        </referenceContainer> 
     </body>
 </page>
 
