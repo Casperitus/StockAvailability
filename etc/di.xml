@@ -1,18 +1,17 @@
 <?xml version="1.0"?>
 <config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:ObjectManager/etc/config.xsd">
-    <!--
     <type name="Magento\Quote\Model\QuoteManagement">
         <plugin name="madar_validate_deliverability" type="Madar\StockAvailability\Plugin\Quote\ValidateDeliverability" sortOrder="10" />
     </type>
 
-     Plugin for Product Collection 
+     Plugin for Product Collection
     <type name="Magento\Catalog\Model\ResourceModel\Product\Collection">
         <plugin name="madar_stock_availability_product_collection" type="Madar\StockAvailability\Plugin\ProductCollectionPlugin" />
     </type>
      Plugin for Product
     <type name="Magento\Catalog\Model\Product">
         <plugin name="madar_stockavailability_product_plugin" type="Madar\StockAvailability\Plugin\ProductPlugin" />
-    </type> -->
+    </type>
 
     <!-- Custom Grouped Product Type -->
     <preference for="Magento\GroupedProduct\Model\Product\Type\Grouped" type="Madar\StockAvailability\Model\Product\Type\Grouped" />
