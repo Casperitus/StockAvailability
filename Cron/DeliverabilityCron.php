@@ -27,24 +27,36 @@ class DeliverabilityCron
             $sources = $this->stockHelper->getAllSourcesWithHubs();
             $batchSize = 500;
 
-            // Optimized fetching
-            $allSkus = $this->stockHelper->getAllProductSkus();
-            $productData = $this->stockHelper->getBulkProductData($allSkus);
-            $inventoryData = $this->stockHelper->getBulkInventoryStatus($allSkus);
+            foreach ($this->stockHelper->getProductSkuBatches($batchSize) as $skuBatch) {
+                if (empty($skuBatch)) {
+                    continue;
+                }
 
-            foreach ($sources as $source) {
-                $mainSourceCode = $source['source_code'];
+                $productData = $this->stockHelper->getBulkProductData($skuBatch);
+                if (empty($productData)) {
+                    continue;
+                }
 
-                $deliverableSkus = $this->stockHelper->calculateDeliverableSkus(
-                    $allSkus,
-                    $source,
-                    $productData,
-                    $inventoryData
-                );
+                $inventorySkus = $this->stockHelper->expandSkusForInventory($skuBatch, $productData);
+                $inventoryData = $this->stockHelper->getBulkInventoryStatus($inventorySkus);
 
-                $chunks = array_chunk($deliverableSkus, 500);
-                foreach ($chunks as $chunk) {
-                    $this->stockHelper->saveDeliverabilityStatuses($chunk, $mainSourceCode);
+                foreach ($sources as $source) {
+                    $mainSourceCode = $source['source_code'];
+
+                    $deliverableSkus = $this->stockHelper->calculateDeliverableSkus(
+                        $skuBatch,
+                        $source,
+                        $productData,
+                        $inventoryData
+                    );
+
+                    if (empty($deliverableSkus)) {
+                        continue;
+                    }
+
+                    foreach (array_chunk($deliverableSkus, $batchSize) as $chunk) {
+                        $this->stockHelper->saveDeliverabilityStatuses($chunk, $mainSourceCode);
+                    }
                 }
             }
 
