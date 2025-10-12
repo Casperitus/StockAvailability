@@ -4,6 +4,7 @@ namespace Madar\StockAvailability\Plugin\Sales;
 
 use Magento\Sales\Api\Data\OrderInterface;
 use Magento\Sales\Api\OrderRepositoryInterface;
+use Madar\StockAvailability\Helper\StockHelper;
 use Madar\StockAvailability\Model\Session;
 use Psr\Log\LoggerInterface;
 
@@ -11,13 +12,16 @@ class OrderRepositoryPlugin
 {
     protected $session;
     protected $logger;
+    protected $stockHelper;
 
     public function __construct(
         Session $session,
-        LoggerInterface $logger
+        LoggerInterface $logger,
+        StockHelper $stockHelper
     ) {
         $this->session = $session;
         $this->logger = $logger;
+        $this->stockHelper = $stockHelper;
     }
 
     /**
@@ -30,42 +34,86 @@ class OrderRepositoryPlugin
     public function beforeSave(OrderRepositoryInterface $subject, OrderInterface $order)
     {
         try {
-            // Get delivery branch data from session
+            $shippingAddress = $order->getShippingAddress();
+
+            $shippingLat = $shippingAddress ? $shippingAddress->getData('latitude') : null;
+            $shippingLng = $shippingAddress ? $shippingAddress->getData('longitude') : null;
+
+            $sessionLat = $this->session->getData('customer_latitude');
+            $sessionLng = $this->session->getData('customer_longitude');
+
+            $shippingHasCoords = $this->hasCoordinates($shippingLat, $shippingLng);
+            $sessionHasCoords = $this->hasCoordinates($sessionLat, $sessionLng);
+
+            $finalLatValue = null;
+            $finalLngValue = null;
+            $finalLatFloat = null;
+            $finalLngFloat = null;
+            $shouldRecalculateBranch = false;
+
+            if ($shippingHasCoords) {
+                $finalLatValue = $shippingLat;
+                $finalLngValue = $shippingLng;
+                $finalLatFloat = (float)$shippingLat;
+                $finalLngFloat = (float)$shippingLng;
+                $shouldRecalculateBranch = !$sessionHasCoords
+                    || !$this->coordinatesEqual($shippingLat, $sessionLat)
+                    || !$this->coordinatesEqual($shippingLng, $sessionLng);
+            } elseif ($sessionHasCoords) {
+                $finalLatValue = $sessionLat;
+                $finalLngValue = $sessionLng;
+                $finalLatFloat = (float)$sessionLat;
+                $finalLngFloat = (float)$sessionLng;
+                $shouldRecalculateBranch = true;
+
+                if ($shippingAddress) {
+                    $shippingAddress->setData('latitude', $finalLatValue);
+                    $shippingAddress->setData('longitude', $finalLngValue);
+                }
+            }
+
+            if ($shippingAddress && $finalLatValue !== null && $finalLngValue !== null) {
+                $shippingAddress->setData('latitude', $finalLatValue);
+                $shippingAddress->setData('longitude', $finalLngValue);
+            }
+
             $sourceCode = $this->session->getData('selected_source_code');
             $branchName = $this->session->getData('selected_branch_name');
             $branchPhone = $this->session->getData('selected_branch_phone');
-            $customerLat = $this->session->getData('customer_latitude');
-            $customerLng = $this->session->getData('customer_longitude');
 
-            // Save to order
-            if ($sourceCode) {
-                $order->setData('delivery_source_code', $sourceCode);
-            }
-            if ($branchName) {
-                $order->setData('delivery_branch_name', $branchName);
-            }
-            if ($branchPhone) {
-                $order->setData('delivery_branch_phone', $branchPhone);
+            if ($finalLatFloat !== null && $finalLngFloat !== null && ($shouldRecalculateBranch || !$sourceCode)) {
+                $nearestSource = $this->stockHelper->findNearestSourceCode($finalLatFloat, $finalLngFloat);
+
+                if ($nearestSource) {
+                    if ($sourceCode !== $nearestSource) {
+                        $branchName = null;
+                        $branchPhone = null;
+                    }
+                    $sourceCode = $nearestSource;
+                } else {
+                    $sourceCode = null;
+                    $branchName = null;
+                    $branchPhone = null;
+                }
             }
 
-            // Also save to shipping address if available
-            $shippingAddress = $order->getShippingAddress();
+            if ($finalLatValue !== null && $finalLngValue !== null) {
+                $this->session->setData('customer_latitude', $finalLatValue);
+                $this->session->setData('customer_longitude', $finalLngValue);
+            }
+
+            $this->session->setData('selected_source_code', $sourceCode);
+            $this->session->setData('selected_branch_name', $branchName);
+            $this->session->setData('selected_branch_phone', $branchPhone);
+
+            $order->setData('delivery_source_code', $sourceCode);
+            $order->setData('delivery_branch_name', $branchName);
+            $order->setData('delivery_branch_phone', $branchPhone);
+
             if ($shippingAddress) {
-                if ($sourceCode) {
-                    $shippingAddress->setData('delivery_source_code', $sourceCode);
-                }
-                if ($branchName) {
-                    $shippingAddress->setData('delivery_branch_name', $branchName);
-                }
-                if ($branchPhone) {
-                    $shippingAddress->setData('delivery_branch_phone', $branchPhone);
-                }
-                if ($customerLat) {
-                    $shippingAddress->setData('latitude', $customerLat);
-                }
-                if ($customerLng) {
-                    $shippingAddress->setData('longitude', $customerLng);
-                }
+                $shippingAddress->setData('delivery_source_code', $sourceCode);
+                $shippingAddress->setData('delivery_branch_name', $branchName);
+                $shippingAddress->setData('delivery_branch_phone', $branchPhone);
             }
 
         } catch (\Exception $e) {
@@ -73,5 +121,19 @@ class OrderRepositoryPlugin
         }
 
         return [$order];
+    }
+
+    protected function hasCoordinates($lat, $lng): bool
+    {
+        return $lat !== null && $lat !== '' && $lng !== null && $lng !== '';
+    }
+
+    protected function coordinatesEqual($first, $second): bool
+    {
+        if ($first === null || $first === '' || $second === null || $second === '') {
+            return false;
+        }
+
+        return abs((float)$first - (float)$second) < 0.000001;
     }
 }

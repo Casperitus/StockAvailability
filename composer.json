@@ -11,12 +11,23 @@
     ],
     "minimum-stability": "dev",
     "require": {},
+    "require-dev": {
+        "phpunit/phpunit": "^9.5"
+    },
     "autoload": {
         "files": [
             "registration.php"
         ],
         "psr-4": {
             "Madar\\StockAvailability\\": ""
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Madar\\StockAvailability\\Test\\": "Test/",
+            "Magento\\Framework\\": "Test/Framework/",
+            "Magento\\Sales\\": "Test/Sales/",
+            "Psr\\Log\\": "Test/Psr/Log/"
         }
     }
 }
