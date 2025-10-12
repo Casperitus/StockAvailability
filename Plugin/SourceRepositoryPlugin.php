@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Madar\StockAvailability\Plugin;
 
 use Magento\Framework\Api\ExtensionAttributesFactory;
