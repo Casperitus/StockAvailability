@@ -242,6 +242,20 @@ if (!$hyvaData || !isset($hyvaData['apiKey']) || empty($hyvaData['apiKey'])) {
                             </div>
                         </div>
 
+                        <div
+                            x-cloak
+                            x-show="!isAddressValid"
+                            id="delivery-selection-hint"
+                            class="flex items-start p-3 mb-3 text-sm text-yellow-800 bg-yellow-50 border border-yellow-200 rounded-md"
+                            role="alert">
+                            <svg class="w-5 h-5 mt-0.5 flex-shrink-0 text-yellow-500" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.25a.75.75 0 01-1.5 0V5.75A.75.75 0 0110 5zm0 8a1 1 0 100 2 1 1 0 000-2z" clip-rule="evenodd"></path>
+                            </svg>
+                            <span class="ml-3">
+                                <?= $escaper->escapeHtml(__('Choose your delivery city or branch from the suggestions before confirming your location.')) ?>
+                            </span>
+                        </div>
+
                         <!-- Action Buttons -->
                         <div class="space-y-2">
                             <button
@@ -261,7 +275,8 @@ if (!$hyvaData || !isset($hyvaData['apiKey']) || empty($hyvaData['apiKey'])) {
                                 id="confirm-location-button"
                                 @click="confirmLocation"
                                 class="btn btn-primary w-full py-2 px-4 bg-primary text-white rounded-md hover:bg-primary-dark disabled:opacity-50"
-                                :disabled="isProcessing">
+                                :disabled="isProcessing || !isAddressValid"
+                                :aria-describedby="!isAddressValid ? 'delivery-selection-hint' : null">
                                 <span class="flex items-center justify-center">
                                     <svg x-show="isProcessing" class="animate-spin -ml-1 mr-3 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
                                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>

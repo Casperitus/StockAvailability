@@ -40,11 +40,11 @@ function mapComponent(_hyvaData) {
 		isModalOpen: false,
 		isEditingAddress: false,
 		showSavedAddresses: isLoggedIn && savedAddressesList.length > 0,
-		selectedBranchName: null,
-		selectedBranchPhone: null,
-		selectedSourceCode: null,
-		currentAddress: "",
-		isFetchingDeliveryBranch: false,
+                selectedBranchName: null,
+                selectedBranchPhone: null,
+                selectedSourceCode: hyvaData.selected_source_code || null,
+                currentAddress: "",
+                isFetchingDeliveryBranch: false,
 		// Initialize latitude/longitude carefully
 		latitude: parseFloat(hyvaData.defaultLatitude) || 24.7136, // Riyadh default
 		longitude: parseFloat(hyvaData.defaultLongitude) || 46.6753, // Riyadh default
@@ -54,19 +54,21 @@ function mapComponent(_hyvaData) {
 		autocomplete: null,
 		savedAddresses: savedAddressesList,
 		selectedAddress: null,
-		isProcessing: false,
-		isAddressValid: false,
-		lastValidCoordinates: null,
-		street: "",
-		city: "",
-		region: "",
-		postcode: "",
-		country: "",
+                isProcessing: false,
+                isAddressValid: Boolean(hyvaData.selected_source_code),
+                lastValidCoordinates: null,
+                street: "",
+                city: "",
+                region: "",
+                postcode: "",
+                country: "",
+                hasStoredSelection: Boolean(hyvaData.selected_source_code),
 
-		_apiKey: hyvaData.apiKey || null, // Crucial for map
-		_isLoggedIn: isLoggedIn,
-		_customerSessionData: initialCustomerSessionData,
-		_sourcesData: sourcesDataList,
+                _apiKey: hyvaData.apiKey || null, // Crucial for map
+                _isLoggedIn: isLoggedIn,
+                _customerSessionData: initialCustomerSessionData,
+                _sourcesData: sourcesDataList,
+                _hyvaData: hyvaData,
 
 		// --- Initialization (combining old and new) ---
 		init() {
@@ -163,8 +165,14 @@ function mapComponent(_hyvaData) {
 					deliveryBranchData.selected_branch_name || null;
 				this.selectedBranchPhone =
 					deliveryBranchData.selected_branch_phone || null;
-				this.selectedSourceCode = // <--- This needs to be from the FRESHLY fetched data
-					deliveryBranchData.selected_source_code || null;
+                                this.selectedSourceCode = // <--- This needs to be from the FRESHLY fetched data
+                                        deliveryBranchData.selected_source_code || null;
+                                this.hasStoredSelection = Boolean(this.selectedSourceCode);
+                                if (this.hasStoredSelection) {
+                                        this.isAddressValid = true;
+                                } else if (!this.currentAddress) {
+                                        this.isAddressValid = false;
+                                }
 				const newLat = parseFloat(deliveryBranchData.customer_latitude);
 				const newLng = parseFloat(deliveryBranchData.customer_longitude);
 				if (
@@ -230,14 +238,16 @@ function mapComponent(_hyvaData) {
 						this._sourcesData
 					);
 
-					if (nearestBranch) {
-						this.selectedBranchName = nearestBranch.source_name;
-						this.selectedBranchPhone = nearestBranch.phone;
-						this.selectedSourceCode = nearestBranch.source_code;
+                                        if (nearestBranch) {
+                                                this.selectedBranchName = nearestBranch.source_name;
+                                                this.selectedBranchPhone = nearestBranch.phone;
+                                                this.selectedSourceCode = nearestBranch.source_code;
 
-						// Update backend
-						this.updateDeliveryBranchDataOnBackend()
-							.then(() => {
+                                                this.hasStoredSelection = true;
+
+                                                // Update backend
+                                                this.updateDeliveryBranchDataOnBackend()
+                                                        .then(() => {
 								console.log(
 									"[MapC_AutoSelect] Default address auto-selected successfully"
 								);
@@ -385,12 +395,13 @@ function mapComponent(_hyvaData) {
 				// Geocode only if address isn't set and coords are valid (from newer version)
 				// Check this.currentAddress against the value derived from lat/lng
 				// If currentAddress is empty OR geocoding gives a different one, then update it.
-				if (
-					!this.currentAddress &&
-					(this.latitude !== 0 || this.longitude !== 0)
-				) {
-					this.reverseGeocodeAddress();
-				}
+                                if (
+                                        !this.currentAddress &&
+                                        this.hasStoredSelection &&
+                                        (this.latitude !== 0 || this.longitude !== 0)
+                                ) {
+                                        this.reverseGeocodeAddress();
+                                }
 			} catch (e) {
 				console.error("[MapC_InitMap] Error initializing Google Map parts:", e);
 			}
@@ -486,16 +497,10 @@ function mapComponent(_hyvaData) {
 			this.validateManualInput(
 				input ? input.value.trim() : this.currentAddress
 			);
-			if (!this.isAddressValid) {
-				if (
-					!document.getElementById("address-error-message") &&
-					this.currentAddress
-				) {
-					// Only show error if address was attempted
-					this.showAddressError(labelEnterValidAddress); // Use label
-				}
-				return;
-			}
+                        if (!this.isAddressValid) {
+                                this.showAddressError(labelEnterValidAddress); // Use label
+                                return;
+                        }
 			this.clearAddressError();
 			this.isProcessing = true;
 
@@ -505,16 +510,18 @@ function mapComponent(_hyvaData) {
 					this.longitude,
 					this._sourcesData
 				);
-				if (!nearestBranch) {
-					alert(labelNoLocalBranch); // Using the pre-defined label
-					this.selectedSourceCode = "NATIONWIDE_SHIPPING";
-					this.selectedBranchName = labelNationwideShipping; // Using the pre-defined label
-					this.selectedBranchPhone = null;
-				} else {
-					this.selectedBranchName = nearestBranch.source_name;
-					this.selectedBranchPhone = nearestBranch.phone;
-					this.selectedSourceCode = nearestBranch.source_code;
-				}
+                                if (!nearestBranch) {
+                                        alert(labelNoLocalBranch); // Using the pre-defined label
+                                        this.selectedSourceCode = "NATIONWIDE_SHIPPING";
+                                        this.selectedBranchName = labelNationwideShipping; // Using the pre-defined label
+                                        this.selectedBranchPhone = null;
+                                } else {
+                                        this.selectedBranchName = nearestBranch.source_name;
+                                        this.selectedBranchPhone = nearestBranch.phone;
+                                        this.selectedSourceCode = nearestBranch.source_code;
+                                }
+
+                                this.hasStoredSelection = Boolean(this.selectedSourceCode);
 
 				if (this._isLoggedIn) {
 					try {
@@ -567,20 +574,22 @@ function mapComponent(_hyvaData) {
 				this.longitude,
 				this._sourcesData
 			);
-			if (!nearestBranch) {
-				alert(labelUnableToFindBranchForAddress); // Use pre-defined label
-				this.selectedSourceCode = "NATIONWIDE_SHIPPING";
-				this.selectedBranchName = labelNationwideShipping; // Use pre-defined label
-				this.selectedBranchPhone = null;
-			} else {
-				this.selectedBranchName = nearestBranch.source_name;
-				this.selectedBranchPhone = nearestBranch.phone;
-				this.selectedSourceCode = nearestBranch.source_code;
-			}
+                        if (!nearestBranch) {
+                                alert(labelUnableToFindBranchForAddress); // Use pre-defined label
+                                this.selectedSourceCode = "NATIONWIDE_SHIPPING";
+                                this.selectedBranchName = labelNationwideShipping; // Use pre-defined label
+                                this.selectedBranchPhone = null;
+                        } else {
+                                this.selectedBranchName = nearestBranch.source_name;
+                                this.selectedBranchPhone = nearestBranch.phone;
+                                this.selectedSourceCode = nearestBranch.source_code;
+                        }
 
-			this.updateDeliveryBranchDataOnBackend()
-				.then(() => {
-					this.isModalOpen = false;
+                        this.hasStoredSelection = Boolean(this.selectedSourceCode);
+
+                        this.updateDeliveryBranchDataOnBackend()
+                                .then(() => {
+                                        this.isModalOpen = false;
 				})
 				.catch((error) =>
 					console.error(
@@ -621,15 +630,17 @@ function mapComponent(_hyvaData) {
 					this._sourcesData
 				);
 
-				if (nearestBranch) {
-					this.selectedBranchName = nearestBranch.source_name;
-					this.selectedBranchPhone = nearestBranch.phone;
-					this.selectedSourceCode = nearestBranch.source_code;
+                                if (nearestBranch) {
+                                        this.selectedBranchName = nearestBranch.source_name;
+                                        this.selectedBranchPhone = nearestBranch.phone;
+                                        this.selectedSourceCode = nearestBranch.source_code;
 
-					// Update backend silently
-					this.updateDeliveryBranchDataOnBackend().catch((error) => {
-						console.error("[MapC_AutoSelect] Error:", error);
-					});
+                                        this.hasStoredSelection = true;
+
+                                        // Update backend silently
+                                        this.updateDeliveryBranchDataOnBackend().catch((error) => {
+                                                console.error("[MapC_AutoSelect] Error:", error);
+                                        });
 				}
 			}
 		},
