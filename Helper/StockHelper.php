@@ -11,7 +11,7 @@ use Psr\Log\LoggerInterface;
 use Magento\Catalog\Api\ProductRepositoryInterface;
 use Magento\GroupedProduct\Model\Product\Type\Grouped;
 use Magento\ConfigurableProduct\Model\Product\Type\Configurable;
-use Magento\Framework\Api\SearchCriteriaBuilder;
+use Magento\Framework\Api\SearchCriteriaBuilderFactory;
 use Magento\Framework\App\ResourceConnection;
 
 class StockHelper extends AbstractHelper
@@ -20,7 +20,7 @@ class StockHelper extends AbstractHelper
     protected $sourceRepository;
     protected $logger;
     protected $productRepository;
-    protected $searchCriteriaBuilder;
+    protected $searchCriteriaBuilderFactory;
     protected $resourceConnection;
     protected $stockCache = [];
     protected $cacheTag = 'MADAR_PRODUCT_DELIVERABILITY';
@@ -33,7 +33,7 @@ class StockHelper extends AbstractHelper
         SourceRepositoryInterface $sourceRepository,
         LoggerInterface $logger,
         ProductRepositoryInterface $productRepository,
-        SearchCriteriaBuilder $searchCriteriaBuilder,
+        SearchCriteriaBuilderFactory $searchCriteriaBuilderFactory,
         ResourceConnection $resourceConnection
     ) {
         parent::__construct($context);
@@ -41,7 +41,7 @@ class StockHelper extends AbstractHelper
         $this->sourceRepository = $sourceRepository;
         $this->logger = $logger;
         $this->productRepository = $productRepository;
-        $this->searchCriteriaBuilder = $searchCriteriaBuilder;
+        $this->searchCriteriaBuilderFactory = $searchCriteriaBuilderFactory;
         $this->resourceConnection = $resourceConnection;
     }
 
@@ -50,6 +50,10 @@ class StockHelper extends AbstractHelper
      */
     public function getBulkInventoryStatus(array $skus): array
     {
+        if (empty($skus)) {
+            return [];
+        }
+
         $connection = $this->resourceConnection->getConnection();
         $table = $connection->getTableName('inventory_source_item');
 
@@ -72,7 +76,12 @@ class StockHelper extends AbstractHelper
      */
     public function getBulkProductData(array $skus): array
     {
-        $searchCriteria = $this->searchCriteriaBuilder
+        if (empty($skus)) {
+            return [];
+        }
+
+        $searchCriteriaBuilder = $this->searchCriteriaBuilderFactory->create();
+        $searchCriteria = $searchCriteriaBuilder
             ->addFilter('sku', $skus, 'in')
             ->addFilter('status', \Magento\Catalog\Model\Product\Attribute\Source\Status::STATUS_ENABLED, 'eq')
             ->create();
@@ -157,7 +166,8 @@ class StockHelper extends AbstractHelper
      */
     public function getAllProductsData(): array
     {
-        $searchCriteria = $this->searchCriteriaBuilder
+        $searchCriteriaBuilder = $this->searchCriteriaBuilderFactory->create();
+        $searchCriteria = $searchCriteriaBuilder
             ->addFilter('status', \Magento\Catalog\Model\Product\Attribute\Source\Status::STATUS_ENABLED, 'eq')
             ->create();
 
@@ -313,8 +323,8 @@ class StockHelper extends AbstractHelper
     public function getAllSourcesWithHubs(): array
     {
         try {
-            $searchCriteria = $this->searchCriteriaBuilder
-                ->create();
+            $searchCriteriaBuilder = $this->searchCriteriaBuilderFactory->create();
+            $searchCriteria = $searchCriteriaBuilder->create();
             $sourceList = $this->sourceRepository->getList($searchCriteria)->getItems();
         } catch (\Exception $e) {
             return [];
@@ -567,22 +577,92 @@ class StockHelper extends AbstractHelper
      */
     public function getAllProductSkus(): array
     {
+        $skus = [];
 
         try {
-            $searchCriteria = $this->searchCriteriaBuilder
-                ->addFilter('status', \Magento\Catalog\Model\Product\Attribute\Source\Status::STATUS_ENABLED, 'eq')
-                ->create();
-            $productList = $this->productRepository->getList($searchCriteria)->getItems();
+            foreach ($this->getProductSkuBatches() as $batch) {
+                foreach ($batch as $sku) {
+                    $skus[] = $sku;
+                }
+            }
         } catch (\Exception $e) {
+            $this->logger->error('[StockHelper] Unable to fetch product SKU batches: ' . $e->getMessage());
             return [];
         }
 
-        $skus = [];
-        foreach ($productList as $product) {
-            $skus[] = $product->getSku();
+        return $skus;
+    }
+
+    /**
+     * Retrieve product SKUs in batches to avoid building enormous SQL queries.
+     *
+     * @param int $batchSize
+     * @return \Generator<int, array<int, string>>
+     */
+    public function getProductSkuBatches(int $batchSize = 500): \Generator
+    {
+        $currentPage = 1;
+
+        do {
+            try {
+                $searchCriteriaBuilder = $this->searchCriteriaBuilderFactory->create();
+                $searchCriteria = $searchCriteriaBuilder
+                    ->addFilter('status', \Magento\Catalog\Model\Product\Attribute\Source\Status::STATUS_ENABLED, 'eq')
+                    ->setPageSize($batchSize)
+                    ->setCurrentPage($currentPage)
+                    ->create();
+
+                $searchResult = $this->productRepository->getList($searchCriteria);
+            } catch (\Exception $e) {
+                $this->logger->error('[StockHelper] Unable to load product batch: ' . $e->getMessage());
+                break;
+            }
+
+            $items = $searchResult->getItems();
+
+            if (empty($items)) {
+                break;
+            }
+
+            $skus = [];
+            foreach ($items as $product) {
+                $skus[] = $product->getSku();
+            }
+
+            yield $skus;
+
+            $totalCount = (int)$searchResult->getTotalCount();
+            $retrieved = $currentPage * $batchSize;
+            if ($retrieved >= $totalCount) {
+                break;
+            }
+
+            $currentPage++;
+        } while (true);
+    }
+
+    /**
+     * Build a unique list of SKUs that require inventory lookups based on product data.
+     *
+     * @param array $skus
+     * @param array $productData
+     * @return array
+     */
+    public function expandSkusForInventory(array $skus, array $productData): array
+    {
+        $inventorySkus = $skus;
+
+        foreach ($productData as $data) {
+            if (empty($data['children'])) {
+                continue;
+            }
+
+            foreach ($data['children'] as $childSku) {
+                $inventorySkus[] = $childSku;
+            }
         }
 
-        return $skus;
+        return array_values(array_unique($inventorySkus));
     }
 
     /**
