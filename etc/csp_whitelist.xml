@@ -1,52 +1,40 @@
-<csp_whitelist xmlns:xsi="http://www.w3.org/2001/2001-XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Csp:etc/csp_whitelist.xsd">
+<csp_whitelist xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:Csp/etc/csp_whitelist.xsd">
     <policies>
         <policy id="script-src">
             <values>
-                <value id="self" type="host">'self'</value>
-                <value id="googletagmanager" type="host">www.googletagmanager.com</value>
-                <value id="google-tagmanager" type="host">tagmanager.google.com</value>
-                <value id="ahrefs-analytics" type="host">analytics.ahrefs.com</value>
-                <value id="facebook-connect" type="host">connect.facebook.net</value>
-                <value id="alpine-js" type="host">*.alpinejs.dev</value>
-                <value id="google-analytics" type="host">www.google-analytics.com</value>
-                <value id="google-maps" type="host">maps.googleapis.com</value>
-                <value id="moyasar-cdn" type="host">cdn.moyasar.com</value>
-                <value id="polyfill-io" type="host">polyfill.io</value>
+                <value id="madar-stockavailability-script-maps-googleapis" type="host">https://maps.googleapis.com</value>
+                <value id="madar-stockavailability-script-maps-gstatic" type="host">https://maps.gstatic.com</value>
             </values>
         </policy>
-
-        <policy id="style-src">
-            <values>
-                <value id="self" type="host">'self'</value>
-                <value id="unsafe-inline" type="host">'unsafe-inline'</value>
-                <value id="fonts-googleapis" type="host">fonts.googleapis.com</value>
-            </values>
-        </policy>
-
         <policy id="img-src">
             <values>
-                <value id="self" type="host">'self'</value>
-                <value id="data" type="host">data:</value>
-                <value id="facebook-img" type="host">www.facebook.com</value>
+                <value id="madar-stockavailability-img-maps-googleapis" type="host">https://maps.googleapis.com</value>
+                <value id="madar-stockavailability-img-maps-gstatic" type="host">https://maps.gstatic.com</value>
             </values>
         </policy>
-
-        <policy id="font-src">
-            <values>
-                <value id="self" type="host">'self'</value>
-                <value id="data" type="host">data:</value>
-                <value id="fonts-gstatic" type="host">fonts.gstatic.com</value>
-            </values>
-        </policy>
-
         <policy id="connect-src">
             <values>
-                <value id="self" type="host">'self'</value>
-                <value id="google-analytics-connect" type="host">www.google-analytics.com</value>
-                <value id="ahrefs-connect" type="host">analytics.ahrefs.com</value>
-                <value id="facebook-connect-api" type="host">connect.facebook.net</value>
-                <value id="facebook-www" type="host">www.facebook.com</value>
-                </values>
+                <value id="madar-stockavailability-connect-maps-googleapis" type="host">https://maps.googleapis.com</value>
+                <value id="madar-stockavailability-connect-maps-gstatic" type="host">https://maps.gstatic.com</value>
+                <value id="madar-stockavailability-connect-nominatim" type="host">https://nominatim.openstreetmap.org</value>
+            </values>
         </policy>
+        <policy id="style-src">
+            <values>
+                <value id="madar-stockavailability-style-fonts-googleapis" type="host">https://fonts.googleapis.com</value>
+            </values>
+        </policy>
+        <policy id="font-src">
+            <values>
+                <value id="madar-stockavailability-font-fonts-gstatic" type="host">https://fonts.gstatic.com</value>
+            </values>
+        </policy>
+        <!--  If you embed Google Maps in an <iframe>, also add:
+        <policy id="frame-src">
+            <values>
+                <value id="madar-stockavailability-frame-google" type="host">https://www.google.com</value>
+            </values>
+        </policy>
+         -->
     </policies>
 </csp_whitelist>

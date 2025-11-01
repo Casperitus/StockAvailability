@@ -4,9 +4,4 @@
         <script src="Madar_StockAvailability::js/mapComponent.js"/>
         <script src="Madar_StockAvailability::js/deliverabilityService.js"/>
     </head>
-    <body>
-        <referenceContainer name="header-content">
-            <block class="Madar\StockAvailability\Block\GoogleMaps" name="delivery-location-button" template="Madar_StockAvailability::google_maps.phtml"/>
-        </referenceContainer>
-    </body>
 </page>
