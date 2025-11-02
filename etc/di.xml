@@ -32,6 +32,10 @@
         <plugin name="madar_save_delivery_data_to_order" type="Madar\StockAvailability\Plugin\Sales\OrderRepositoryPlugin" sortOrder="10" />
     </type>
 
+    <type name="Hyva\Checkout\Model\Form\EntityFormService">
+        <plugin name="madar_stockavailability_checkout_prefill" type="Madar\StockAvailability\Plugin\Hyva\Checkout\EntityFormServicePlugin" sortOrder="10" />
+    </type>
+
     <!-- Console command -->
     <type name="Magento\Framework\Console\CommandList">
         <arguments>
