@@ -1,0 +1,452 @@
+<?php
+
+/**
+ * Hyvä Themes - https://hyva.io
+ * Copyright © Hyvä Themes 2020-present.
+ * This product is licensed per Magento install
+ * See https://hyva.io/license
+ */
+
+declare(strict_types=1);
+
+use Hyva\Theme\Model\ViewModelRegistry;
+use Hyva\Theme\ViewModel\CurrentProduct;
+use Magento\Framework\Escaper;
+use Magento\Framework\View\Element\Template;
+
+/** @var Template $block */
+/** @var Escaper $escaper */
+/** @var ViewModelRegistry $viewModels */
+/** @var CurrentProduct $currentProduct */
+$currentProduct = $viewModels->require(CurrentProduct::class);
+
+?>
+<script>
+    /**
+     * initConfigurableOptions(productId, optionConfig)
+     *
+     * Merged code:
+     *   - Original Hyvä logic with "salable" fallback
+     *   - DeliverabilityService integrated
+     *   - If no location is selected => default Magento/Hyvä behavior
+     *   - If location is selected => filter out "No" deliverable
+     */
+    function initConfigurableOptions(productId, optionConfig) {
+
+        /**
+         * Checks if a product is deliverable, given the store's `selected_source_code`.
+         * If no location is selected, everything is treated as deliverable ("Yes").
+         */
+        function checkDeliverability(productId) {
+            // If no location is selected, treat everything as deliverable.
+            const sourceCode = Alpine.store('deliverability')?.selected_source_code;
+            if (!sourceCode) {
+                return true;
+            }
+
+            // Use the productId directly, so that "11025-CSW" remains intact.
+            const sku = optionConfig.sku[productId];
+            if (!sku) {
+                // If there's no matching SKU in the mapping, treat it as not deliverable.
+                return false;
+            }
+            return Alpine.store('deliverability').map[sku] === 'Yes';
+        }
+
+
+        /**
+         * Optional helper to style a specific attribute option if it's not deliverable
+         * (instead of fully disabling).
+         */
+        function optionIsDeliverable(attributeId, optionId) {
+            const productsForOption = getProductIdsForOption({
+                id: optionId
+            });
+            // If at least one child product among them is deliverable => return true
+            return productsForOption.some(pid => checkDeliverability(pid));
+        }
+
+        // For usage in .changeOption(...) or anywhere we must find the product IDs for an attribute's option
+        function getProductIdsForOption(option) {
+            const attributeId = findAttributeByOptionId(option.id);
+            const allOptions = optionConfig.attributes[attributeId];
+            const opt = allOptions?.options?.find(o => o.id === option.id);
+            return opt?.products || [];
+        }
+
+        function findAttributeByOptionId(optionId) {
+            for (const attributeId in optionConfig.attributes) {
+                const attributeOptions = optionConfig.attributes[attributeId].options || [];
+                if (attributeOptions.find(opt => opt.id === optionId)) {
+                    return attributeId;
+                }
+            }
+        }
+
+        function findPathParam(key) {
+            const baseUrl = (BASE_URL.substring(0, 2) === '//' ? 'http:' : '') + BASE_URL;
+            const baseUrlParts = (new URL(baseUrl)).pathname.replace(/\/$/, '').split('/');
+            const pathParts = window.location.pathname.split('/').slice(baseUrlParts.length + 3);
+            for (let i = 0; i < pathParts.length; i += 2) {
+                if (pathParts[i] === key && pathParts.length > i) {
+                    return pathParts[i + 1];
+                }
+            }
+        }
+
+        return {
+            productId,
+            optionConfig,
+
+            // Same as Hyvä: used for cart pre-config / query param "id"
+            itemId: (new URLSearchParams(window.location.search)).get('id') || findPathParam('id'),
+
+            selectedValues: {},
+            allowedAttributeOptions: [],
+            productIndex: 0,
+            productIndexForPrice: 0,
+
+            init() {
+
+                // 1) Single pass child SKUs right away
+                this.registerAllChildSkus();
+
+                // 2) Normal Hyvä logic: findAllowedAttributeOptions()
+                this.findAllowedAttributeOptions();
+
+                // 3) After a tick, handle default values & preselection
+                this.$nextTick(() => {
+                    if (typeof this.optionConfig.defaultValues === 'object') {
+                        for (const [attributeId, value] of Object.entries(this.optionConfig.defaultValues)) {
+                            this.changeOption(attributeId, String(value));
+                        }
+                    }
+                    this.preselectQuerystringItems();
+                    this.preselectLocationHashItems();
+                });
+
+                // 4) Watch deliverability.map => re-check
+                this.$watch(
+                    () => JSON.stringify(Alpine.store('deliverability').map),
+                    () => {
+                        console.log('[Configurable] deliverability.map changed => re-check');
+                        this.findAllowedAttributeOptions();
+                        this.findSimpleIndex();
+                        this.updatePrices();
+                        this.updateGallery();
+                    }
+                );
+
+                // 5) ALSO watch private-content-loaded => re-register child SKUs & recalc
+                document.addEventListener("private-content-loaded", () => {
+                    console.log("[Configurable] private-content-loaded => re-register SKUs and re-check");
+                    this.registerAllChildSkus();
+
+                    // Force recalc, in case location data or user session just arrived
+                    this.findAllowedAttributeOptions();
+                    this.findSimpleIndex();
+                    this.updatePrices();
+                    this.updateGallery();
+                });
+            },
+
+
+            registerAllChildSkus() {
+                const productIds = Object.keys(this.optionConfig.sku || {});
+                if (productIds.length) {
+                    const skus = productIds.map(pid => this.optionConfig.sku[pid]);
+                    DeliverabilityService.registerSkus(skus);
+                }
+            },
+
+            // "is this product ID deliverable"?  Just a helper that calls our local check.
+            checkDeliverability(productId) {
+                return checkDeliverability(productId);
+            },
+
+            // If you want to style a swatch differently
+            optionIsDeliverable(attributeId, optionId) {
+                return optionIsDeliverable(attributeId, optionId);
+            },
+
+            /**
+             * Hyvä: "option is active" => does it appear in the allowed set?
+             */
+            optionIsActive(attributeId, optionId) {
+                return !!this.getAllowedAttributeOptions(attributeId)
+                    .find(option => option.id === optionId);
+            },
+
+            /**
+             * Hyvä: "option is enabled" => do we have any child product linking attributeId->optionId in the index?
+             */
+            optionIsEnabled(attributeId, optionId) {
+                for (const pid in this.optionConfig.index) {
+                    if (this.optionConfig.index[pid][attributeId] === optionId) {
+                        return true;
+                    }
+                }
+                return false;
+            },
+
+            // Re-check which simple product is selected after changing an option
+            findSimpleIndex() {
+                this.productIndex = this.calculateSimpleIndexForPartialSelection(this.selectedValues);
+                this.productIndexForPrice = this.findCheapestProductForPartialSelection(this.selectedValues);
+            },
+
+            calculateSimpleIndexForPartialSelection(selectedValues) {
+                if (Object.keys(selectedValues).length === 0) {
+                    return 0;
+                }
+                const partialProducts = this.findProductIdsForPartialSelection(selectedValues);
+                return partialProducts.length ? partialProducts[0] : 0;
+            },
+
+            calculateSimpleIndexForFullSelection(selectedValues) {
+                if (!this.isFullSelection(selectedValues)) return false;
+                const productIndexes = this.optionConfig.index;
+                return Object.keys(productIndexes).find(productIndex => {
+                    const productCandidateOptions = productIndexes[productIndex];
+                    for (const productOption in productCandidateOptions) {
+                        if (!selectedValues[productOption] ||
+                            selectedValues[productOption] !== productCandidateOptions[productOption]) {
+                            return false;
+                        }
+                    }
+                    return productIndex;
+                });
+            },
+
+            isFullSelection(selectedValues) {
+                return Object.keys(selectedValues).length === Object.keys(this.optionConfig.attributes).length;
+            },
+
+            // Hyvä’s method to re-check which attribute options remain valid
+            findAllowedAttributeOptions() {
+                this.allowedAttributeOptions = this.calculateAllowedAttributeOptions(this.selectedValues);
+            },
+            getAllowedAttributeOptions(attributeId) {
+                return this.allowedAttributeOptions[attributeId] || [];
+            },
+            getAllAttributeOptions(attributeId) {
+                const attr = this.optionConfig.attributes[attributeId];
+                return attr && attr.options ? attr.options : [];
+            },
+
+            calculateAllowedAttributeOptions(selectedValues) {
+                const allAttributes = this.optionConfig.attributes;
+                const allAttributesSorted = Object.values(allAttributes).sort((a, b) => a.position - b.position);
+
+                const newAllowedAttributeOptions = {};
+
+                allAttributesSorted.forEach(attribute => {
+                    const selectionWithoutAttr = this.removeAttrFromSelection(selectedValues, attribute.id);
+                    const availableIndexes = this.calculateAvailableProductIndexes(selectionWithoutAttr);
+
+                    newAllowedAttributeOptions[attribute.id] =
+                        allAttributes[attribute.id].options.filter(option => {
+                            return option.products.some(productId => availableIndexes.includes(productId));
+                        });
+                });
+
+                return newAllowedAttributeOptions;
+            },
+
+            /**
+             * The big function: figure out which child product IDs remain possible given:
+             *  - user’s partial selection
+             *  - "salable" logic
+             *  - deliverability status
+             */
+            calculateAvailableProductIndexes(selectedOptions) {
+                // 1) If no attributes are chosen, return all (or salable) but filter out non-deliverable
+                if (Object.keys(selectedOptions).length === 0) {
+                    if (Object.values(this.optionConfig.salable || {}).length) {
+                        const salableFlattened = [].concat.apply([],
+                            [].concat.apply([], Object.values(this.optionConfig.salable).map(Object.values))
+                        );
+                        const deduped = salableFlattened.filter((x, i, a) => a.indexOf(x) === i);
+                        return deduped.filter(pid => this.checkDeliverability(pid));
+                    }
+                    return Object.keys(this.optionConfig.index)
+                        .filter(pid => this.checkDeliverability(pid));
+                }
+
+                // 2) If user picked some attributes => intersect salable sets
+                const selectedIds = Object.keys(selectedOptions);
+                if (Object.values(this.optionConfig.salable || {}).length) {
+                    const selectedOptionIndexes = selectedIds.map(attrId => {
+                        const val = selectedOptions[attrId];
+                        return this.optionConfig.salable[attrId]?.[val] || [];
+                    });
+                    let result = selectedOptionIndexes.reduce((acc, arr) => acc.filter(x => arr.includes(x)),
+                        selectedOptionIndexes[0] || []);
+                    return result.filter(pid => this.checkDeliverability(pid));
+                } else {
+                    const productIndexes = this.optionConfig.index;
+                    let result = Object.keys(productIndexes).filter(idx => {
+                        for (const attrId of selectedIds) {
+                            if (productIndexes[idx][attrId] !== String(selectedOptions[attrId])) {
+                                return false;
+                            }
+                        }
+                        return true;
+                    });
+                    return result.filter(pid => this.checkDeliverability(pid));
+                }
+            },
+
+            findProductIdsForPartialSelection(optionSelection) {
+                return Object.values(optionSelection).reduce((candidates, optionId) => {
+                    const newCands = getProductIdsForOption({
+                        id: optionId
+                    });
+                    if (candidates === null) {
+                        return newCands;
+                    }
+                    return candidates.filter(pid => newCands.includes(pid));
+                }, null) || [];
+            },
+
+            findCheapestProductForPartialSelection(optionSelection) {
+                const cands = this.findProductIdsForPartialSelection(optionSelection);
+                if (!cands.length) return 0;
+                return cands.reduce((cheapest, simpleIdx) => {
+                    if (!this.optionConfig.optionPrices[cheapest]) return simpleIdx;
+                    const knownCheapestPrice = this.optionConfig.optionPrices[cheapest].finalPrice.amount;
+                    const candidatePrice = this.optionConfig.optionPrices[simpleIdx].finalPrice.amount;
+                    return knownCheapestPrice > candidatePrice ? simpleIdx : cheapest;
+                }, cands[0]);
+            },
+
+            /**
+             * The user changed an attribute => update selectedValues => recalc
+             */
+            changeOption(attributeId, value) {
+                if (value === '') {
+                    delete this.selectedValues[attributeId];
+                } else {
+                    const allowed = this.getAllowedAttributeOptions(attributeId);
+                    const isValid = allowed.find(opt => opt.id === value);
+                    if (isValid) {
+                        this.selectedValues[attributeId] = value;
+                    }
+                }
+
+                this.findSimpleIndex();
+                this.findAllowedAttributeOptions();
+                this.updatePrices();
+                this.updateGallery();
+
+                const cands = this.findProductIdsForPartialSelection(this.selectedValues);
+                window.dispatchEvent(new CustomEvent('configurable-selection-changed', {
+                    detail: {
+                        productId: this.productId,
+                        optionId: attributeId,
+                        value: value,
+                        productIndex: this.productIndex,
+                        selectedValues: this.selectedValues,
+                        candidates: cands,
+                        skuCandidates: cands.map(id => this.optionConfig.sku[id]),
+                    }
+                }));
+            },
+
+            clearOptionIfActive(attributeId, value) {
+                if (this.selectedValues[attributeId] === value) {
+                    this.blurLabel?.();
+                    this.changeOption(attributeId, '');
+                }
+            },
+
+            removeAttrFromSelection(selectedValues, attributeId) {
+                const newSel = {
+                    ...selectedValues
+                };
+                delete newSel[attributeId];
+                return newSel;
+            },
+
+            calculateIsMinimalPrice() {
+                return !this.isFullSelection(this.selectedValues);
+            },
+
+            updatePrices() {
+                const val = this.optionConfig.optionPrices[this.productIndexForPrice] ||
+                    this.optionConfig.prices;
+                window.dispatchEvent(new CustomEvent(`update-prices-${this.productId}`, {
+                    detail: Object.assign(val, {
+                        isMinimalPrice: this.calculateIsMinimalPrice()
+                    })
+                }));
+            },
+
+            updateGallery() {
+                if (this.productIndex) {
+                    const images = this.optionConfig.images[this.productIndex];
+                    if (images) {
+                        window.dispatchEvent(new CustomEvent("update-gallery", {
+                            detail: this.sortImagesByPosition(images)
+                        }));
+                    }
+                } else {
+                    window.dispatchEvent(new Event("reset-gallery"));
+                }
+            },
+
+            sortImagesByPosition(images) {
+                return images.sort((x, y) =>
+                    x.position === y.position ? 0 : (parseInt(x.position) > parseInt(y.position) ? 1 : -1)
+                );
+            },
+
+            // For cart preselection on PDP
+            onGetCartData(data) {
+                <?php if ($currentProduct->exists()): ?>
+                    if (this.productId === '<?= (int) $currentProduct->get()->getEntityId() ?>') {
+                        this.preselectCartItems(data);
+                    }
+                <?php endif; ?>
+            },
+            preselectCartItems(data) {
+                const cart = data?.cart;
+                if (cart?.items) {
+                    const cartItem = cart.items.find(item => {
+                        return item.item_id === this.itemId && item.product_id === this.productId;
+                    });
+                    if (cartItem && cartItem.options?.length) {
+                        cartItem.options.forEach(option => {
+                            this.changeOption(option.option_id, option.option_value);
+                        });
+                    }
+                }
+            },
+
+            blurLabel() {
+                if (document.activeElement) {
+                    document.activeElement.blur();
+                }
+            },
+
+            // If the page has query params like ?size=167 or #144=167 => preselect them
+            preselectQuerystringItems() {
+                const urlQ = new URLSearchParams(window.location.search.replace('?', ''));
+                this.preselectItemsBasedOnLocation(attr => urlQ.get(attr.code));
+            },
+            preselectLocationHashItems() {
+                const urlH = new URLSearchParams(window.location.hash.replace('#', ''));
+                this.preselectItemsBasedOnLocation(attr => urlH.get(attr.id));
+            },
+            preselectItemsBasedOnLocation(getVal) {
+                Object.values(this.optionConfig.attributes).forEach(attribute => {
+                    const v = getVal(attribute);
+                    if (v) {
+                        this.changeOption(attribute.id, v);
+                    }
+                });
+            },
+        }
+    }
+</script>
+<?php $hyvaCsp->registerInlineScript() ?>
