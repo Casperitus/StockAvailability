@@ -73,6 +73,18 @@ $hyvaData = $block->prepareHyvaData();
             selectedAddress: '',
             hasSelectedLocation: false,
             googleMapsApiLoaded: false,
+            sourcesData: window.registrationMapData?.sourcesData || [],
+            selectedBranchName: window.registrationMapData?.selected_branch_name || '',
+            selectedBranchPhone: window.registrationMapData?.selected_branch_phone || '',
+            selectedSourceCode: window.registrationMapData?.selected_source_code || null,
+            street: '',
+            city: '',
+            region: '',
+            postcode: '',
+            country: 'SA',
+            isPersistingLocation: false,
+            lastPersistedSignature: null,
+            pendingSignature: null,
 
             init() {
                 // Load Google Maps API
@@ -131,6 +143,7 @@ $hyvaData = $block->prepareHyvaData();
                 this.initAutocomplete();
 
                 this.mapLoaded = true;
+                this.resolveBranchForLocation();
             },
 
             initAutocomplete() {
@@ -191,6 +204,8 @@ $hyvaData = $block->prepareHyvaData();
                 } else {
                     this.selectedAddress = address;
                 }
+
+                this.resolveBranchForLocation();
             },
 
             parseAddressComponents(components) {
@@ -217,6 +232,12 @@ $hyvaData = $block->prepareHyvaData();
 
                 // Update the actual form inputs directly
                 const street = [componentMap.street_number, componentMap.route].filter(Boolean).join(' ');
+
+                this.street = street;
+                this.city = componentMap.locality || '';
+                this.region = componentMap.administrative_area_level_1 || '';
+                this.postcode = componentMap.postal_code || '';
+                this.country = componentMap.country || this.country;
 
                 // Find and update the form fields by their IDs
                 const streetInput = document.getElementById('street');
@@ -272,6 +293,167 @@ $hyvaData = $block->prepareHyvaData();
                         longitude: this.longitude
                     }
                 }));
+
+            },
+
+            resolveBranchForLocation() {
+                const branch = this.findNearestBranch(this.latitude, this.longitude, this.sourcesData);
+
+                if (branch) {
+                    this.selectedBranchName = branch.source_name;
+                    this.selectedBranchPhone = branch.phone;
+                    this.selectedSourceCode = branch.source_code;
+                } else {
+                    this.selectedBranchName = '';
+                    this.selectedBranchPhone = '';
+                    this.selectedSourceCode = null;
+                }
+            },
+
+            async persistLocationSelection() {
+                const payload = this.buildLocationPayload();
+                const signature = JSON.stringify(payload);
+
+                if (this.lastPersistedSignature === signature) {
+                    return;
+                }
+
+                if (this.isPersistingLocation) {
+                    this.pendingSignature = signature;
+                    return;
+                }
+
+                this.pendingSignature = null;
+
+                this.isPersistingLocation = true;
+
+                try {
+                    const response = await fetch('/stockavailability/branch/update', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Requested-With': 'XMLHttpRequest'
+                        },
+                        body: signature,
+                        credentials: 'same-origin'
+                    });
+
+                    const data = await response.json();
+
+                    if (!data.success) {
+                        throw new Error(data.message || 'Failed to persist location selection');
+                    }
+
+                    this.lastPersistedSignature = signature;
+                    this.pendingSignature = null;
+
+                    window.dispatchEvent(new CustomEvent('madar:location-updated', {
+                        detail: data
+                    }));
+                } catch (error) {
+                    console.error('[RegMap] Unable to persist location selection', error);
+                } finally {
+                    this.isPersistingLocation = false;
+
+                    if (
+                        this.pendingSignature &&
+                        this.pendingSignature !== this.lastPersistedSignature
+                    ) {
+                        this.pendingSignature = null;
+                        this.persistLocationSelection();
+                    }
+                }
+            },
+
+            buildLocationPayload() {
+                const payload = {
+                    selected_source_code: this.selectedSourceCode,
+                    selected_branch_name: this.selectedBranchName,
+                    selected_branch_phone: this.selectedBranchPhone,
+                    customer_latitude: this.latitude,
+                    customer_longitude: this.longitude
+                };
+
+                const address = {
+                    street: this.street ? [this.street] : [],
+                    city: this.city || '',
+                    region: this.region || '',
+                    postcode: this.postcode || '',
+                    country_id: this.country || 'SA'
+                };
+
+                const firstnameInput = document.querySelector('input[name="firstname"]');
+                const lastnameInput = document.querySelector('input[name="lastname"]');
+                const telephoneInput = document.querySelector('input[name="telephone"]');
+
+                if (firstnameInput?.value) {
+                    address.firstname = firstnameInput.value;
+                }
+                if (lastnameInput?.value) {
+                    address.lastname = lastnameInput.value;
+                }
+                if (telephoneInput?.value) {
+                    address.telephone = telephoneInput.value;
+                }
+
+                if (
+                    address.street.length ||
+                    address.city ||
+                    address.region ||
+                    address.postcode
+                ) {
+                    address.latitude = this.latitude;
+                    address.longitude = this.longitude;
+                    payload.address = address;
+                }
+
+                return payload;
+            },
+
+            findNearestBranch(lat, lng, sourcesData) {
+                if (!Array.isArray(sourcesData) || sourcesData.length === 0) {
+                    return null;
+                }
+
+                let nearestBranch = null;
+                let shortestDistance = Infinity;
+
+                sourcesData.forEach((source) => {
+                    if (!source.latitude || !source.longitude || !source.delivery_range_km) {
+                        return;
+                    }
+
+                    const distance = this.calculateDistance(
+                        lat,
+                        lng,
+                        parseFloat(source.latitude),
+                        parseFloat(source.longitude)
+                    );
+
+                    const deliveryRange = parseFloat(source.delivery_range_km);
+
+                    if (distance <= deliveryRange && distance < shortestDistance) {
+                        shortestDistance = distance;
+                        nearestBranch = source;
+                    }
+                });
+
+                return nearestBranch;
+            },
+
+            calculateDistance(lat1, lon1, lat2, lon2) {
+                const toRad = (value) => (value * Math.PI) / 180;
+                const R = 6371; // Earth's radius in km
+                const dLat = toRad(lat2 - lat1);
+                const dLon = toRad(lon2 - lon1);
+                const a =
+                    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                    Math.cos(toRad(lat1)) *
+                        Math.cos(toRad(lat2)) *
+                        Math.sin(dLon / 2) *
+                        Math.sin(dLon / 2);
+                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                return R * c;
             },
 
             useCurrentLocation() {

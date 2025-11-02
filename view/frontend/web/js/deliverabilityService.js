@@ -4,22 +4,74 @@
 	let watcherInitialized = false;
 	let previousSourceCode = null; // Tracks the last *processed* source code
 	let effectDebounceTimeout = null; // Timer for the Alpine.effect
-	let fetchInProgress = false;
-	let requestQueue = new Map(); // To prevent duplicate fetches for the exact same request
+        let fetchInProgress = false;
+        let requestQueue = new Map(); // To prevent duplicate fetches for the exact same request
+        let locationListenerRegistered = false;
+        let pendingSourceCode = null;
 
 	const DEBOUNCE_DELAY = 300; // Debounce for the effect watcher
 	const RETRY_ATTEMPTS = 3;
 	const RETRY_DELAY = 1000;
 
-	function initService() {
-		if (watcherInitialized) return;
-		watcherInitialized = true;
+        function initService() {
+                if (watcherInitialized) return;
+                watcherInitialized = true;
 
-		document.addEventListener("alpine:init", () => {
-			initializeDeliverabilityStore();
-			setupSourceCodeEffectWatcher();
-		});
-	}
+                registerLocationUpdateListener();
+
+                document.addEventListener("alpine:init", () => {
+                        initializeDeliverabilityStore();
+                        setupSourceCodeEffectWatcher();
+                });
+        }
+
+        function registerLocationUpdateListener() {
+                if (locationListenerRegistered) {
+                        return;
+                }
+
+                locationListenerRegistered = true;
+
+                window.addEventListener("madar:location-updated", (event) => {
+                        const detail = event.detail || {};
+                        const branchPayload = detail.branch || detail.branch_details || {};
+
+                        const normalizedBranch = {
+                                selected_source_code:
+                                        branchPayload.selected_source_code || branchPayload.source_code || "",
+                                selected_branch_name:
+                                        branchPayload.selected_branch_name || branchPayload.branch_name || null,
+                                selected_branch_phone:
+                                        branchPayload.selected_branch_phone || branchPayload.branch_phone || null,
+                                customer_latitude:
+                                        branchPayload.customer_latitude || branchPayload.latitude || null,
+                                customer_longitude:
+                                        branchPayload.customer_longitude || branchPayload.longitude || null,
+                        };
+
+                        if (typeof Alpine !== "undefined") {
+                                const customerDataStore = Alpine.store("customerData");
+                                if (customerDataStore) {
+                                        if (!customerDataStore.data) {
+                                                customerDataStore.data = {};
+                                        }
+                                        customerDataStore.data["delivery-branch"] = {
+                                                ...(customerDataStore.data["delivery-branch"] || {}),
+                                                ...normalizedBranch,
+                                        };
+                                }
+                        }
+
+                        const sourceCode = normalizedBranch.selected_source_code || "";
+                        const store = typeof Alpine !== "undefined" ? Alpine.store("deliverability") : null;
+
+                        if (store) {
+                                processSourceCodeChange(sourceCode);
+                        } else {
+                                pendingSourceCode = sourceCode;
+                        }
+                });
+        }
 
 	function initializeDeliverabilityStore() {
 		if (!Alpine.store("deliverability")) {
@@ -58,12 +110,17 @@
 			});
 		}
 
-		const initialSource =
-			Alpine.store("customerData")?.data?.["delivery-branch"]
-				?.selected_source_code || "";
+                const initialSource =
+                        Alpine.store("customerData")?.data?.["delivery-branch"]
+                                ?.selected_source_code || "";
 
-		processSourceCodeChange(initialSource);
-	}
+                processSourceCodeChange(initialSource);
+
+                if (pendingSourceCode !== null) {
+                        processSourceCodeChange(pendingSourceCode);
+                        pendingSourceCode = null;
+                }
+        }
 
 	function setupSourceCodeEffectWatcher() {
 		Alpine.effect(() => {

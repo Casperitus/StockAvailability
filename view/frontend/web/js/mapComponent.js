@@ -246,7 +246,7 @@ function mapComponent(_hyvaData) {
                                                 this.hasStoredSelection = true;
 
                                                 // Update backend
-                                                this.updateDeliveryBranchDataOnBackend()
+                                                this.updateDeliveryBranchDataOnBackend({ saveAddress: false })
                                                         .then(() => {
 								console.log(
 									"[MapC_AutoSelect] Default address auto-selected successfully"
@@ -268,40 +268,138 @@ function mapComponent(_hyvaData) {
 			}
 		},
 
-		async updateDeliveryBranchDataOnBackend() {
-			this.isProcessing = true;
-			try {
-				const response = await fetch("/stockavailability/branch/update", {
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-						"X-Requested-With": "XMLHttpRequest",
-					},
-					body: JSON.stringify({
-						selected_source_code: this.selectedSourceCode,
-						selected_branch_name: this.selectedBranchName,
-						selected_branch_phone: this.selectedBranchPhone,
-						customer_latitude: this.latitude,
-						customer_longitude: this.longitude,
-					}),
-					credentials: "same-origin",
-				});
-				const data = await response.json();
-				if (data.success) {
-					await this.fetchDeliveryBranchData(); // This reloads store, which DS watches
-				} else {
-					throw new Error(
-						data.message || "Failed to update delivery branch data on backend"
-					);
-				}
-			} catch (error) {
-				console.error("[MapC_UpdateBackend] Error:", error);
-				alert("An error occurred updating your location. Please try again.");
-				throw error; // Re-throw so callers like confirmLocation can know
-			} finally {
-				this.isProcessing = false;
-			}
-		},
+                async updateDeliveryBranchDataOnBackend(options = {}) {
+                        this.isProcessing = true;
+                        try {
+                                const payload = this.buildLocationPayload(options);
+                                const response = await fetch("/stockavailability/branch/update", {
+                                        method: "POST",
+                                        headers: {
+                                                "Content-Type": "application/json",
+                                                "X-Requested-With": "XMLHttpRequest",
+                                        },
+                                        body: JSON.stringify(payload),
+                                        credentials: "same-origin",
+                                });
+                                const data = await response.json();
+                                if (!data.success) {
+                                        throw new Error(
+                                                data.message || "Failed to update delivery branch data on backend"
+                                        );
+                                }
+
+                                this.applyLocationResponse(data);
+                                await this.fetchDeliveryBranchData();
+
+                                return data;
+                        } catch (error) {
+                                console.error("[MapC_UpdateBackend] Error:", error);
+                                alert("An error occurred updating your location. Please try again.");
+                                throw error; // Re-throw so callers like confirmLocation can know
+                        } finally {
+                                this.isProcessing = false;
+                        }
+                },
+
+                buildLocationPayload(options = {}) {
+                        const payload = {
+                                selected_source_code: this.selectedSourceCode,
+                                selected_branch_name: this.selectedBranchName,
+                                selected_branch_phone: this.selectedBranchPhone,
+                                customer_latitude: this.latitude,
+                                customer_longitude: this.longitude,
+                        };
+
+                        const hasAddressDetails =
+                                Boolean(this.street) ||
+                                Boolean(this.city) ||
+                                Boolean(this.postcode) ||
+                                Boolean(this.region);
+
+                        if (hasAddressDetails) {
+                                payload.address = {
+                                        address_id: this.selectedAddress?.id || null,
+                                        firstname: this._customerSessionData.firstname || "",
+                                        lastname: this._customerSessionData.lastname || "",
+                                        telephone: this._customerSessionData.telephone || "",
+                                        street: this.street ? [this.street] : [],
+                                        city: this.city || "",
+                                        postcode: this.postcode || "",
+                                        country_id: this.country || "SA",
+                                        region: this.region || "",
+                                        is_default_shipping:
+                                                this.selectedAddress?.is_default_shipping ||
+                                                this.savedAddresses.length === 0,
+                                        is_default_billing:
+                                                this.selectedAddress?.is_default_billing || false,
+                                };
+
+                                payload.address.latitude = this.latitude;
+                                payload.address.longitude = this.longitude;
+                        }
+
+                        if (options.saveAddress && this._isLoggedIn && payload.address) {
+                                payload.save_address = true;
+                        }
+
+                        return payload;
+                },
+
+                applyLocationResponse(data) {
+                        if (!data || typeof data !== "object") {
+                                return;
+                        }
+
+                        const branch = data.branch || {};
+
+                        if (Object.prototype.hasOwnProperty.call(branch, "selected_source_code")) {
+                                this.selectedSourceCode = branch.selected_source_code;
+                        }
+                        if (Object.prototype.hasOwnProperty.call(branch, "selected_branch_name")) {
+                                this.selectedBranchName = branch.selected_branch_name;
+                        }
+                        if (Object.prototype.hasOwnProperty.call(branch, "selected_branch_phone")) {
+                                this.selectedBranchPhone = branch.selected_branch_phone;
+                        }
+                        if (Object.prototype.hasOwnProperty.call(branch, "customer_latitude") && branch.customer_latitude !== null) {
+                                const updatedLat = parseFloat(branch.customer_latitude);
+                                if (!Number.isNaN(updatedLat)) {
+                                        this.latitude = updatedLat;
+                                }
+                        }
+                        if (
+                                Object.prototype.hasOwnProperty.call(branch, "customer_longitude") &&
+                                branch.customer_longitude !== null
+                        ) {
+                                const updatedLng = parseFloat(branch.customer_longitude);
+                                if (!Number.isNaN(updatedLng)) {
+                                        this.longitude = updatedLng;
+                                }
+                        }
+
+                        if (typeof Alpine !== "undefined") {
+                                const customerDataStore = Alpine.store("customerData");
+                                if (customerDataStore) {
+                                        if (!customerDataStore.data) {
+                                                customerDataStore.data = {};
+                                        }
+                                        customerDataStore.data["delivery-branch"] = {
+                                                ...(customerDataStore.data["delivery-branch"] || {}),
+                                                ...branch,
+                                        };
+                                }
+                        }
+
+                        window.dispatchEvent(
+                                new CustomEvent("madar:location-updated", {
+                                        detail: {
+                                                branch,
+                                                shipping_address: data.shipping_address || {},
+                                                prefill: data.prefill || {},
+                                        },
+                                })
+                        );
+                },
 
 		// --- Modal and UI Toggles (closer to older version's directness + newer flags) ---
 		toggleModal() {
@@ -523,17 +621,14 @@ function mapComponent(_hyvaData) {
 
                                 this.hasStoredSelection = Boolean(this.selectedSourceCode);
 
-				if (this._isLoggedIn) {
-					try {
-						await this.saveAddressToServer();
-					} catch (e) {
-						console.warn(
-							"[MapC_Confirm] Error saving address (non-critical):",
-							e
-						);
-					}
-				}
-				await this.updateDeliveryBranchDataOnBackend(); // This will POST, then GET, then update store
+                                const shouldSaveAddress =
+                                        this._isLoggedIn &&
+                                        this.street &&
+                                        this.city;
+
+                                await this.updateDeliveryBranchDataOnBackend({
+                                        saveAddress: shouldSaveAddress,
+                                }); // This will POST, then GET, then update store
 				this.isModalOpen = false;
 			} catch (error) {
 				// Error is usually alerted in updateDeliveryBranchDataOnBackend if it's from there
@@ -587,7 +682,7 @@ function mapComponent(_hyvaData) {
 
                         this.hasStoredSelection = Boolean(this.selectedSourceCode);
 
-                        this.updateDeliveryBranchDataOnBackend()
+                        this.updateDeliveryBranchDataOnBackend({ saveAddress: false })
                                 .then(() => {
                                         this.isModalOpen = false;
 				})
@@ -638,7 +733,7 @@ function mapComponent(_hyvaData) {
                                         this.hasStoredSelection = true;
 
                                         // Update backend silently
-                                        this.updateDeliveryBranchDataOnBackend().catch((error) => {
+                                        this.updateDeliveryBranchDataOnBackend({ saveAddress: false }).catch((error) => {
                                                 console.error("[MapC_AutoSelect] Error:", error);
                                         });
 				}
@@ -745,63 +840,17 @@ function mapComponent(_hyvaData) {
 			d.id = "address-error-message";
 			i?.parentNode?.insertBefore(d, i.nextSibling);
 		},
-		clearAddressError() {
-			/* ... from newer, already included above ... */ const i =
-				this.$refs.addressSearch ||
-				document.getElementById("am-address-search");
-			const d = document.getElementById("address-error-message");
-			if (i) {
-				i.classList.remove("border-red-500", "bg-red-50");
-				i.classList.add("focus:ring-primary", "focus:border-primary");
-			}
-			d?.remove();
-		},
-		saveAddressToServer() {
-			/* ... from newer, already included above ... */ if (
-				!this.street ||
-				!this.city ||
-				!this.country
-			)
-				throw new Error("Addr incomplete");
-			const ad = {
-				address_id: this.selectedAddress?.id || null,
-				firstname: this._customerSessionData.firstname || "Cust",
-				lastname: this._customerSessionData.lastname || "User",
-				telephone: this._customerSessionData.telephone || "000",
-				street: [this.street],
-				city: this.city,
-				postcode: this.postcode || "00000",
-				country_id: this.country,
-				region: this.region || "",
-				latitude: this.latitude,
-				longitude: this.longitude,
-				is_default_shipping:
-					this.savedAddresses.length === 0 ||
-					(this.selectedAddress
-						? this.selectedAddress.is_default_shipping
-						: true),
-				is_default_billing:
-					this.savedAddresses.length === 0 ||
-					(this.selectedAddress
-						? this.selectedAddress.is_default_billing
-						: false),
-			};
-			return fetch("/stockavailability/address/save", {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-					"X-Requested-With": "XMLHttpRequest",
-				},
-				body: JSON.stringify(ad),
-				credentials: "same-origin",
-			})
-				.then((r) => r.json())
-				.then((d) => {
-					if (!d.success)
-						throw new Error(d.message || "Failed to save address");
-					return d;
-				});
-		},
+                clearAddressError() {
+                        /* ... from newer, already included above ... */ const i =
+                                this.$refs.addressSearch ||
+                                document.getElementById("am-address-search");
+                        const d = document.getElementById("address-error-message");
+                        if (i) {
+                                i.classList.remove("border-red-500", "bg-red-50");
+                                i.classList.add("focus:ring-primary", "focus:border-primary");
+                        }
+                        d?.remove();
+                },
 		createMarker(position) {
 			/* ... from newer, already included above ... */ if (
 				!this.map ||
