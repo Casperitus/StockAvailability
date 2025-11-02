@@ -1,0 +1,50 @@
+<?php
+declare(strict_types=1);
+
+use Madar\StockAvailability\ViewModel\DeliverabilityViewModel;
+use Magento\Catalog\Api\Data\ProductInterface;
+use Magento\Framework\View\Element\Template;
+
+/** @var Template $block */
+
+$viewModel = $block->getData('viewModel');
+if (!$viewModel instanceof DeliverabilityViewModel) {
+    return;
+}
+
+/** @var ProductInterface|null $product */
+$product = $block->getData('product');
+
+if (!$product instanceof ProductInterface) {
+    $productInfoBlock = $block->getLayout()->getBlock('product.info');
+    if ($productInfoBlock && method_exists($productInfoBlock, 'getProduct')) {
+        $product = $productInfoBlock->getProduct();
+    }
+}
+
+if (!$product instanceof ProductInterface || !$product->getId()) {
+    return;
+}
+
+$viewModel->setProductId((int) $product->getId());
+$deliverabilityData = $viewModel->getDeliverabilityData();
+
+if (empty($deliverabilityData)) {
+    return;
+}
+
+$payload = json_encode(
+    $deliverabilityData,
+    JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT
+);
+
+if ($payload === false) {
+    return;
+}
+?>
+<div
+    class="deliverability-view-model"
+    data-role="deliverability-data"
+    data-product-id="<?= (int) $product->getId(); ?>"
+    data-deliverability="<?= $block->escapeHtmlAttr($payload); ?>"
+></div>
