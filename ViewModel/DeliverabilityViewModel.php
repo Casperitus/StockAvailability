@@ -27,7 +27,7 @@ class DeliverabilityViewModel implements ArgumentInterface, IdentityInterface
      * @param int $productId
      * @return $this
      */
-    public function setProductId(int $productId)
+    public function setProductId(int $productId): self
     {
         $this->productId = $productId;
         return $this;
@@ -44,7 +44,13 @@ class DeliverabilityViewModel implements ArgumentInterface, IdentityInterface
             return [];
         }
 
-        return $this->stockHelper->getDeliverabilityDataByProductId($this->productId);
+        if (!method_exists($this->stockHelper, 'getDeliverabilityDataByProductId')) {
+            return [];
+        }
+
+        $data = $this->stockHelper->getDeliverabilityDataByProductId($this->productId);
+
+        return is_array($data) ? $data : [];
     }
 
     /**
