@@ -5,20 +5,20 @@ namespace Madar\StockAvailability\Controller\Store;
 use Magento\Framework\App\Action\Action;
 use Magento\Framework\App\Action\Context;
 use Madar\StockAvailability\Helper\StockHelper;
+use Madar\StockAvailability\Logger\Location as LocationLogger;
 use Magento\Framework\Controller\Result\JsonFactory;
-use Psr\Log\LoggerInterface;
 
 class Availability extends Action
 {
     protected $stockHelper;
     protected $resultJsonFactory;
-    protected $logger;
+    protected LocationLogger $logger;
 
     public function __construct(
         Context $context,
         StockHelper $stockHelper,
         JsonFactory $resultJsonFactory,
-        LoggerInterface $logger
+        LocationLogger $logger
     ) {
         parent::__construct($context);
         $this->stockHelper = $stockHelper;
@@ -34,6 +34,13 @@ class Availability extends Action
         $latitude = (float) $this->getRequest()->getParam('latitude');
         $longitude = (float) $this->getRequest()->getParam('longitude');
         $maxDistance = (float) $this->getRequest()->getParam('max_distance', 50);
+
+        $this->logger->debug('Store availability request', [
+            'sku' => $sku,
+            'latitude' => $latitude,
+            'longitude' => $longitude,
+            'max_distance' => $maxDistance,
+        ]);
 
         if (!$sku || !$latitude || !$longitude) {
             return $result->setData([
@@ -96,12 +103,17 @@ class Availability extends Action
             // Limit to top 10
             $availableStores = array_slice($availableStores, 0, 10);
 
-            return $result->setData([
+            $response = [
                 'success' => true,
                 'stores' => $availableStores,
                 'total_found' => count($availableStores)
-            ]);
+            ];
+
+            $this->logger->debug('Store availability response', ['response' => $response]);
+
+            return $result->setData($response);
         } catch (\Exception $e) {
+            $this->logger->error('Error finding available stores: ' . $e->getMessage(), ['exception' => $e]);
             return $result->setData([
                 'success' => false,
                 'message' => 'Error finding available stores: ' . $e->getMessage()

@@ -5,23 +5,23 @@ namespace Madar\StockAvailability\Controller\Deliverability;
 use Magento\Framework\App\Action\Action;
 use Magento\Framework\App\Action\Context;
 use Madar\StockAvailability\Helper\StockHelper;
-use Magento\Framework\Controller\Result\JsonFactory;
+use Madar\StockAvailability\Logger\Location as LocationLogger;
 use Magento\Framework\App\Request\Http;
-use Psr\Log\LoggerInterface;
+use Magento\Framework\Controller\Result\JsonFactory;
 
 class Get extends Action
 {
     protected $stockHelper;
     protected $resultJsonFactory;
     protected $request;
-    protected $logger;
+    protected LocationLogger $logger;
 
     public function __construct(
         Context $context,
         StockHelper $stockHelper,
         JsonFactory $resultJsonFactory,
         Http $request,
-        LoggerInterface $logger
+        LocationLogger $logger
     ) {
         parent::__construct($context);
         $this->stockHelper = $stockHelper;
@@ -37,6 +37,12 @@ class Get extends Action
         $skus = (array) $this->request->getParam('skus', []);
         $sourceCode = $this->request->getParam('source_code', null);
         $sourceCodes = (array) $this->request->getParam('source_codes', []); // Add this line
+
+        $this->logger->debug('Deliverability request payload', [
+            'skus' => $skus,
+            'source_code' => $sourceCode,
+            'source_codes' => $sourceCodes,
+        ]);
 
         if (empty($skus)) {
             return $result->setData([
@@ -74,11 +80,16 @@ class Get extends Action
                 }
             }
 
-            return $result->setData([
+            $response = [
                 'success' => true,
                 'data' => $deliverabilityData
-            ]);
+            ];
+            $this->logger->debug('Deliverability response payload', ['response' => $response]);
+
+            return $result->setData($response);
         } catch (\Exception $e) {
+            $this->logger->error('Unable to fetch deliverability data: ' . $e->getMessage(), ['exception' => $e]);
+
             return $result->setData([
                 'success' => false,
                 'message' => 'Unable to fetch deliverability data.'

@@ -3,14 +3,15 @@
 namespace Madar\StockAvailability\Model;
 
 use Madar\StockAvailability\Helper\StockHelper;
+use Madar\StockAvailability\Logger\Location as LocationLogger;
 use Magento\Checkout\Model\Session as CheckoutSession;
 use Magento\Customer\Api\AddressRepositoryInterface;
 use Magento\Customer\Api\Data\AddressInterfaceFactory;
 use Magento\Customer\Model\Session as CustomerSession;
+use Magento\Directory\Model\RegionFactory;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\Quote\Api\CartRepositoryInterface;
 use Magento\Sales\Api\Data\OrderInterface;
-use Psr\Log\LoggerInterface;
 
 class LocationManager
 {
@@ -28,7 +29,16 @@ class LocationManager
 
     private StockHelper $stockHelper;
 
-    private LoggerInterface $logger;
+    private LocationLogger $logger;
+
+    private RegionFactory $regionFactory;
+
+    /**
+     * Cache resolved regions to reduce duplicate DB calls during a single request.
+     *
+     * @var array
+     */
+    private array $resolvedRegions = [];
 
     public function __construct(
         Session $session,
@@ -38,7 +48,8 @@ class LocationManager
         AddressRepositoryInterface $addressRepository,
         AddressInterfaceFactory $addressFactory,
         StockHelper $stockHelper,
-        LoggerInterface $logger
+        RegionFactory $regionFactory,
+        LocationLogger $logger
     ) {
         $this->session = $session;
         $this->customerSession = $customerSession;
@@ -47,6 +58,7 @@ class LocationManager
         $this->addressRepository = $addressRepository;
         $this->addressFactory = $addressFactory;
         $this->stockHelper = $stockHelper;
+        $this->regionFactory = $regionFactory;
         $this->logger = $logger;
     }
 
@@ -58,6 +70,8 @@ class LocationManager
      */
     public function persistLocation(array $payload): array
     {
+        $this->logger->debug('Persisting location payload', ['payload' => $payload]);
+
         $latitude = $payload['customer_latitude'] ?? $payload['latitude'] ?? null;
         $longitude = $payload['customer_longitude'] ?? $payload['longitude'] ?? null;
 
@@ -71,6 +85,7 @@ class LocationManager
         $branchData = $this->resolveBranchData($payload, $latitude, $longitude);
 
         $addressData = $this->normalizeAddressData($payload['address'] ?? []);
+        $this->logger->debug('Normalized address data', ['address' => $addressData]);
         if ($addressData && $latitude !== null && $longitude !== null) {
             $addressData['latitude'] = $latitude;
             $addressData['longitude'] = $longitude;
@@ -89,6 +104,8 @@ class LocationManager
             'shipping_address' => $addressData,
             'prefill' => $this->getCheckoutPrefillData(),
         ];
+
+        $this->logger->debug('Persist location response', ['response' => $response]);
 
         return $response;
     }
@@ -212,6 +229,16 @@ class LocationManager
             return [];
         }
 
+        $regionData = $addressData['region'] ?? [];
+        if (!is_array($regionData) && $regionData !== null && $regionData !== '') {
+            $regionData = ['region' => $regionData];
+        } elseif (!is_array($regionData)) {
+            $regionData = [];
+        }
+
+        $regionId = $addressData['region_id'] ?? ($regionData['region_id'] ?? null);
+        $regionCode = $addressData['region_code'] ?? ($regionData['region_code'] ?? null);
+
         return [
             'shipping_address' => [
                 'firstname' => $addressData['firstname'] ?? '',
@@ -221,7 +248,10 @@ class LocationManager
                 'city' => $addressData['city'] ?? '',
                 'postcode' => $addressData['postcode'] ?? '',
                 'country_id' => $addressData['country_id'] ?? '',
-                'region' => $addressData['region'] ?? '',
+                'region' => $regionData,
+                'region_id' => $regionId,
+                'region_code' => $regionCode,
+                'district' => $addressData['district'] ?? null,
                 'latitude' => $addressData['latitude'] ?? $this->session->getData('customer_latitude'),
                 'longitude' => $addressData['longitude'] ?? $this->session->getData('customer_longitude'),
             ],
@@ -244,7 +274,10 @@ class LocationManager
                     $branchData['selected_source_code'] = $nearestSource;
                 }
             } catch (\Exception $exception) {
-                $this->logger->error('Unable to resolve nearest branch: ' . $exception->getMessage());
+                $this->logger->error(
+                    'Unable to resolve nearest branch: ' . $exception->getMessage(),
+                    ['exception' => $exception]
+                );
             }
         }
 
@@ -252,13 +285,17 @@ class LocationManager
         $this->session->setData('selected_branch_name', $branchData['selected_branch_name']);
         $this->session->setData('selected_branch_phone', $branchData['selected_branch_phone']);
 
-        return array_merge(
+        $resolved = array_merge(
             $branchData,
             [
                 'customer_latitude' => $this->session->getData('customer_latitude'),
                 'customer_longitude' => $this->session->getData('customer_longitude'),
             ]
         );
+
+        $this->logger->debug('Resolved branch data', ['branch' => $resolved]);
+
+        return $resolved;
     }
 
     private function normalizeAddressData($address): array
@@ -267,11 +304,130 @@ class LocationManager
             return [];
         }
 
-        if (isset($address['street']) && !is_array($address['street'])) {
-            $address['street'] = [$address['street']];
+        $streetLines = $address['street'] ?? [];
+        if (!is_array($streetLines)) {
+            $streetLines = [$streetLines];
+        }
+
+        $district = trim((string)($address['district'] ?? ''));
+        if ($district !== '') {
+            if (!in_array($district, $streetLines, true)) {
+                $streetLines[] = $district;
+            }
+            $address['district'] = $district;
+        } else {
+            unset($address['district']);
+        }
+
+        $address['street'] = array_values(array_filter($streetLines, static function ($line) {
+            return $line !== null && $line !== '';
+        }));
+
+        $address = $this->normalizeRegionData($address);
+
+        return $address;
+    }
+
+    private function normalizeRegionData(array $address): array
+    {
+        $countryId = $address['country_id'] ?? 'SA';
+
+        if (!empty($address['region'])) {
+            if (is_array($address['region'])) {
+                $regionArray = $address['region'];
+                if (!empty($regionArray['region_id']) && empty($regionArray['region'])) {
+                    $regionArray = array_merge(
+                        $regionArray,
+                        $this->resolveRegionById((int)$regionArray['region_id'])
+                    );
+                } elseif (!empty($regionArray['region'])) {
+                    $regionArray = array_merge(
+                        $regionArray,
+                        $this->resolveRegionByName((string)$regionArray['region'], $countryId)
+                    );
+                }
+                $address['region'] = $this->filterRegionArray($regionArray);
+            } else {
+                $resolved = $this->resolveRegionByName((string)$address['region'], $countryId);
+                if (!empty($resolved)) {
+                    $address['region'] = $resolved;
+                } else {
+                    $address['region'] = ['region' => $address['region']];
+                }
+            }
+        } elseif (!empty($address['region_id'])) {
+            $address['region'] = $this->resolveRegionById((int)$address['region_id']);
+        }
+
+        if (isset($address['region']) && is_array($address['region'])) {
+            if (!empty($address['region']['region_id'])) {
+                $address['region_id'] = (int)$address['region']['region_id'];
+            }
+            if (!empty($address['region']['region'])) {
+                $address['region'] = $address['region'];
+            }
         }
 
         return $address;
+    }
+
+    private function resolveRegionByName(string $regionName, string $countryId): array
+    {
+        $cacheKey = sprintf('name|%s|%s', strtolower($countryId), strtolower($regionName));
+        if (isset($this->resolvedRegions[$cacheKey])) {
+            return $this->resolvedRegions[$cacheKey];
+        }
+
+        $region = $this->regionFactory->create()->loadByName($regionName, $countryId);
+        if (!$region || !$region->getId()) {
+            $region = $this->regionFactory->create()->loadByCode($regionName, $countryId);
+        }
+
+        $data = [];
+        if ($region && $region->getId()) {
+            $data = [
+                'region' => $region->getName(),
+                'region_id' => (int)$region->getId(),
+                'region_code' => $region->getCode(),
+            ];
+        }
+
+        $this->resolvedRegions[$cacheKey] = $data;
+
+        return $data;
+    }
+
+    private function resolveRegionById(int $regionId): array
+    {
+        $cacheKey = sprintf('id|%d', $regionId);
+        if (isset($this->resolvedRegions[$cacheKey])) {
+            return $this->resolvedRegions[$cacheKey];
+        }
+
+        $region = $this->regionFactory->create()->load($regionId);
+        $data = [];
+        if ($region && $region->getId()) {
+            $data = [
+                'region' => $region->getName(),
+                'region_id' => (int)$region->getId(),
+                'region_code' => $region->getCode(),
+            ];
+        }
+
+        $this->resolvedRegions[$cacheKey] = $data;
+
+        return $data;
+    }
+
+    private function filterRegionArray(array $region): array
+    {
+        return array_filter([
+            'region' => $region['region'] ?? null,
+            'region_id' => isset($region['region_id']) ? (int)$region['region_id'] : null,
+            'region_code' => $region['region_code'] ?? null,
+        ], static function ($value) {
+            return $value !== null && $value !== '';
+        });
     }
 
     private function persistCustomerAddress(array $addressData): void
@@ -283,6 +439,11 @@ class LocationManager
         try {
             $customerId = (int)$this->customerSession->getCustomerId();
             $addressId = isset($addressData['address_id']) ? (int)$addressData['address_id'] : null;
+
+            $this->logger->debug('Persist customer address payload', [
+                'customer_id' => $customerId,
+                'address' => $addressData,
+            ]);
 
             if ($addressId) {
                 $address = $this->addressRepository->getById($addressId);
@@ -326,6 +487,10 @@ class LocationManager
             }
 
             $this->addressRepository->save($address);
+            $this->logger->info('Customer address persisted', [
+                'customer_id' => $customerId,
+                'address_id' => $address->getId(),
+            ]);
         } catch (\Exception $exception) {
             $this->logger->error('Failed to persist customer address: ' . $exception->getMessage());
         }
@@ -333,6 +498,10 @@ class LocationManager
 
     private function updateQuote(array $addressData, array $branchData): void
     {
+        $this->logger->debug('Updating quote with location data', [
+            'address' => $addressData,
+            'branch' => $branchData,
+        ]);
         try {
             $quote = $this->checkoutSession->getQuote();
         } catch (\Exception $exception) {
@@ -398,6 +567,7 @@ class LocationManager
 
         try {
             $this->cartRepository->save($quote);
+            $this->logger->debug('Quote location data saved', ['quote_id' => $quote->getId()]);
         } catch (\Exception $exception) {
             $this->logger->error('Unable to persist quote with new location data: ' . $exception->getMessage());
         }

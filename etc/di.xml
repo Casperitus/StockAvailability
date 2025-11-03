@@ -46,4 +46,13 @@
         </arguments>
     </type>
 
+    <type name="Madar\StockAvailability\Logger\Location">
+        <arguments>
+            <argument name="name" xsi:type="string">madar_location</argument>
+            <argument name="handlers" xsi:type="array">
+                <item name="location" xsi:type="object">Madar\StockAvailability\Logger\Handler\Location</item>
+            </argument>
+        </arguments>
+    </type>
+
 </config>

@@ -15,9 +15,18 @@ function mapComponent(_hyvaData) {
 		hyvaData.customerData && typeof hyvaData.customerData === "object"
 			? hyvaData.customerData
 			: {};
-	const sourcesDataList = Array.isArray(hyvaData.sourcesData)
-		? hyvaData.sourcesData
-		: [];
+        const sourcesDataList = Array.isArray(hyvaData.sourcesData)
+                ? hyvaData.sourcesData
+                : [];
+
+        const initialLatitudeValue =
+                typeof hyvaData.latitude !== "undefined"
+                        ? hyvaData.latitude
+                        : hyvaData.defaultLatitude;
+        const initialLongitudeValue =
+                typeof hyvaData.longitude !== "undefined"
+                        ? hyvaData.longitude
+                        : hyvaData.defaultLongitude;
 
 	// Translatable labels (defaults, should be passed via hyvaData from PHP Block)
 	const labelNationwideShipping =
@@ -40,28 +49,31 @@ function mapComponent(_hyvaData) {
 		isModalOpen: false,
 		isEditingAddress: false,
 		showSavedAddresses: isLoggedIn && savedAddressesList.length > 0,
-                selectedBranchName: null,
-                selectedBranchPhone: null,
+                selectedBranchName: hyvaData.selected_branch_name || null,
+                selectedBranchPhone: hyvaData.selected_branch_phone || null,
                 selectedSourceCode: hyvaData.selected_source_code || null,
                 currentAddress: "",
                 isFetchingDeliveryBranch: false,
-		// Initialize latitude/longitude carefully
-		latitude: parseFloat(hyvaData.defaultLatitude) || 24.7136, // Riyadh default
-		longitude: parseFloat(hyvaData.defaultLongitude) || 46.6753, // Riyadh default
-		googleMapsApiLoaded: false,
-		map: null,
-		marker: null,
-		autocomplete: null,
-		savedAddresses: savedAddressesList,
-		selectedAddress: null,
+                // Initialize latitude/longitude carefully
+                latitude: parseFloat(initialLatitudeValue) || 24.7136, // Riyadh default
+                longitude: parseFloat(initialLongitudeValue) || 46.6753, // Riyadh default
+                googleMapsApiLoaded: false,
+                map: null,
+                marker: null,
+                autocomplete: null,
+                savedAddresses: savedAddressesList,
+                selectedAddress: null,
                 isProcessing: false,
                 isAddressValid: Boolean(hyvaData.selected_source_code),
                 lastValidCoordinates: null,
                 street: "",
+                streetLines: [],
                 city: "",
                 region: "",
+                regionData: null,
                 postcode: "",
                 country: "",
+                district: "",
                 hasStoredSelection: Boolean(hyvaData.selected_source_code),
 
                 _apiKey: hyvaData.apiKey || null, // Crucial for map
@@ -310,23 +322,40 @@ function mapComponent(_hyvaData) {
                                 customer_longitude: this.longitude,
                         };
 
+                        const streetLines = Array.isArray(this.streetLines)
+                                ? [...this.streetLines]
+                                : this.street
+                                ? [this.street]
+                                : [];
+
+                        if (this.district && !streetLines.includes(this.district)) {
+                                streetLines.push(this.district);
+                        }
+
                         const hasAddressDetails =
-                                Boolean(this.street) ||
+                                streetLines.length > 0 ||
                                 Boolean(this.city) ||
                                 Boolean(this.postcode) ||
-                                Boolean(this.region);
+                                Boolean(this.region) ||
+                                Boolean(this.country);
 
                         if (hasAddressDetails) {
+                                const regionPayload =
+                                        this.regionData && Object.keys(this.regionData).length > 0
+                                                ? { ...this.regionData }
+                                                : this.region
+                                                ? { region: this.region }
+                                                : null;
+
                                 payload.address = {
                                         address_id: this.selectedAddress?.id || null,
                                         firstname: this._customerSessionData.firstname || "",
                                         lastname: this._customerSessionData.lastname || "",
                                         telephone: this._customerSessionData.telephone || "",
-                                        street: this.street ? [this.street] : [],
+                                        street: streetLines,
                                         city: this.city || "",
                                         postcode: this.postcode || "",
                                         country_id: this.country || "SA",
-                                        region: this.region || "",
                                         is_default_shipping:
                                                 this.selectedAddress?.is_default_shipping ||
                                                 this.savedAddresses.length === 0,
@@ -334,6 +363,18 @@ function mapComponent(_hyvaData) {
                                                 this.selectedAddress?.is_default_billing || false,
                                 };
 
+                                if (regionPayload) {
+                                        payload.address.region = regionPayload;
+                                        if (regionPayload.region_id) {
+                                                payload.address.region_id = regionPayload.region_id;
+                                        }
+                                        if (regionPayload.region_code) {
+                                                payload.address.region_code = regionPayload.region_code;
+                                        }
+                                }
+                                if (this.district) {
+                                        payload.address.district = this.district;
+                                }
                                 payload.address.latitude = this.latitude;
                                 payload.address.longitude = this.longitude;
                         }
@@ -387,6 +428,47 @@ function mapComponent(_hyvaData) {
                                                 ...(customerDataStore.data["delivery-branch"] || {}),
                                                 ...branch,
                                         };
+                                }
+                        }
+
+                        const shippingAddress = data.shipping_address || {};
+                        if (shippingAddress && typeof shippingAddress === "object") {
+                                const streetLines = Array.isArray(shippingAddress.street)
+                                        ? shippingAddress.street
+                                        : shippingAddress.street
+                                        ? [shippingAddress.street]
+                                        : [];
+                                this.streetLines = streetLines;
+                                this.street = streetLines.join(", ");
+                                this.district = shippingAddress.district || streetLines[1] || "";
+                                this.city = shippingAddress.city || this.city;
+                                this.postcode = shippingAddress.postcode || this.postcode;
+                                this.country = shippingAddress.country_id || this.country || "SA";
+
+                                if (shippingAddress.region && typeof shippingAddress.region === "object") {
+                                        this.regionData = { ...shippingAddress.region };
+                                        this.region = this.regionData.region || this.region;
+                                } else if (shippingAddress.region) {
+                                        this.regionData = {
+                                                region: shippingAddress.region,
+                                                ...(shippingAddress.region_id
+                                                        ? { region_id: shippingAddress.region_id }
+                                                        : {}),
+                                                ...(shippingAddress.region_code
+                                                        ? { region_code: shippingAddress.region_code }
+                                                        : {}),
+                                        };
+                                        this.region = shippingAddress.region;
+                                }
+
+                                const addressParts = [
+                                        streetLines[0] || "",
+                                        this.district,
+                                        this.city,
+                                        this.region,
+                                ].filter(Boolean);
+                                if (addressParts.length) {
+                                        this.currentAddress = addressParts.join(", ");
                                 }
                         }
 
@@ -649,20 +731,39 @@ function mapComponent(_hyvaData) {
 			}
 			this.isProcessing = true;
 
-			this.selectedAddress = address;
-			this.updateCoordinates(
-				parseFloat(address.latitude),
-				parseFloat(address.longitude)
-			);
-			this.currentAddress =
-				address.details || `${address.street}, ${address.city}`;
-			this.street = address.street || "";
-			this.city = address.city || "";
-			this.region = address.region || "";
-			this.postcode = address.postcode || "";
-			this.country = address.country_id || "SA";
-			this.isAddressValid = true;
-			this.clearAddressError();
+                        this.selectedAddress = address;
+                        this.updateCoordinates(
+                                parseFloat(address.latitude),
+                                parseFloat(address.longitude)
+                        );
+                        const streetLines = Array.isArray(address.street)
+                                ? address.street.filter((line) => typeof line === "string" && line.trim() !== "")
+                                : address.street
+                                ? [address.street]
+                                : [];
+                        this.streetLines = streetLines;
+                        this.street = streetLines.join(", ");
+                        this.district = address.district || streetLines[1] || "";
+                        this.city = address.city || "";
+                        this.postcode = address.postcode || "";
+                        this.country = address.country_id || "SA";
+
+                        if (address.region && typeof address.region === "object") {
+                                this.regionData = { ...address.region };
+                                this.region = this.regionData.region || "";
+                        } else {
+                                this.regionData = {
+                                        ...(address.region ? { region: address.region } : {}),
+                                        ...(address.region_id ? { region_id: address.region_id } : {}),
+                                        ...(address.region_code ? { region_code: address.region_code } : {}),
+                                };
+                                this.region = address.region || this.regionData.region || "";
+                        }
+
+                        const displayParts = [streetLines[0] || "", this.district, this.city, this.region].filter(Boolean);
+                        this.currentAddress = address.details || displayParts.join(", ");
+                        this.isAddressValid = true;
+                        this.clearAddressError();
 
 			const nearestBranch = this.findNearestBranch(
 				this.latitude,
@@ -783,29 +884,84 @@ function mapComponent(_hyvaData) {
 			this.lastValidCoordinates = { lat, lng };
 			this.isAddressValid = true;
 		}, // From newer
-		parseAddressComponents(components) {
-			/* ... from newer version, already included above ... */ const map = {
-				street_number: "",
-				route: "",
-				sublocality: "",
-				locality: "",
-				administrative_area_level_1: "",
-				postal_code: "",
-				country: "",
-			};
-			components.forEach((c) => {
-				const t = c.types[0];
-				if (map.hasOwnProperty(t)) map[t] = c.long_name;
-				if (t === "country") map.country = c.short_name;
-			});
-			this.street = [map.street_number, map.route, map.sublocality]
-				.filter(Boolean)
-				.join(", ");
-			this.city = map.locality;
-			this.region = map.administrative_area_level_1;
-			this.postcode = map.postal_code;
-			this.country = map.country || "SA";
-		},
+                parseAddressComponents(components) {
+                        if (!components) return;
+
+                        const componentMap = {
+                                street_number: "",
+                                route: "",
+                                locality: "",
+                                administrative_area_level_1: "",
+                                administrative_area_level_2: "",
+                                postal_code: "",
+                                country: "",
+                                country_long: "",
+                                sublocality: "",
+                                sublocality_level_1: "",
+                                sublocality_level_2: "",
+                                neighborhood: "",
+                                region_code: "",
+                        };
+
+                        components.forEach((component) => {
+                                component.types.forEach((type) => {
+                                        switch (type) {
+                                                case "street_number":
+                                                case "route":
+                                                case "locality":
+                                                case "administrative_area_level_1":
+                                                case "administrative_area_level_2":
+                                                case "postal_code":
+                                                case "sublocality":
+                                                case "sublocality_level_1":
+                                                case "sublocality_level_2":
+                                                case "neighborhood":
+                                                        componentMap[type] = component.long_name;
+                                                        break;
+                                                case "country":
+                                                        componentMap.country = component.short_name || component.long_name;
+                                                        componentMap.country_long = component.long_name;
+                                                        break;
+                                        }
+
+                                        if (type === "administrative_area_level_1" && component.short_name) {
+                                                componentMap.region_code = component.short_name;
+                                        }
+                                });
+                        });
+
+                        const primaryStreet = [componentMap.street_number, componentMap.route]
+                                .filter(Boolean)
+                                .join(" ")
+                                .trim();
+                        const districtCandidate =
+                                componentMap.sublocality_level_1 ||
+                                componentMap.sublocality_level_2 ||
+                                componentMap.sublocality ||
+                                componentMap.neighborhood ||
+                                "";
+
+                        const streetLines = primaryStreet ? [primaryStreet] : [];
+                        if (districtCandidate) {
+                                streetLines.push(districtCandidate);
+                        }
+
+                        this.streetLines = streetLines;
+                        this.street = streetLines.join(", ");
+                        this.district = districtCandidate;
+                        this.city = componentMap.locality || componentMap.administrative_area_level_2 || "";
+                        this.region = componentMap.administrative_area_level_1 || "";
+                        this.regionData = this.region
+                                ? {
+                                          region: this.region,
+                                          ...(componentMap.region_code
+                                                  ? { region_code: componentMap.region_code }
+                                                  : {}),
+                                  }
+                                : null;
+                        this.postcode = componentMap.postal_code || "";
+                        this.country = componentMap.country || this.country || "SA";
+                },
 		validateManualInput(val) {
 			/* ... from newer, already included above ... */ const v = (
 				val || ""
