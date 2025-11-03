@@ -2,18 +2,21 @@
 
 namespace Madar\StockAvailability\Block;
 
-use Magento\Framework\View\Element\Template;
 use Madar\StockAvailability\Helper\StockHelper;
-use Magento\Framework\App\Config\ScopeConfigInterface;
-use Magento\Framework\Session\SessionManagerInterface;
-use Magento\Customer\Model\Session as CustomerSession;
+use Madar\StockAvailability\Logger\Location as LocationLogger;
+use Madar\StockAvailability\Model\Session as LocationSession;
+use Magento\ConfigurableProduct\Model\Product\Type\Configurable as ConfigurableType;
 use Magento\Customer\Api\AddressRepositoryInterface;
 use Magento\Customer\Api\CustomerRepositoryInterface;
-use Magento\Framework\Registry;
-use Magento\ConfigurableProduct\Model\Product\Type\Configurable as ConfigurableType;
-use Magento\GroupedProduct\Model\Product\Type\Grouped as GroupedType;
-use Magento\Framework\Data\Form\FormKey;
+use Magento\Customer\Api\Data\AddressInterface;
+use Magento\Customer\Model\Session as CustomerSession;
+use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\App\ObjectManager;
+use Magento\Framework\Data\Form\FormKey;
+use Magento\Framework\Registry;
+use Magento\Framework\Session\SessionManagerInterface;
+use Magento\Framework\View\Element\Template;
+use Magento\GroupedProduct\Model\Product\Type\Grouped as GroupedType;
 
 class GoogleMaps extends Template
 {
@@ -25,6 +28,8 @@ class GoogleMaps extends Template
     protected $addressRepository;
     protected $customerRepository;
     protected $formKey;
+    protected LocationSession $locationSession;
+    protected LocationLogger $locationLogger;
 
     public function __construct(
         Template\Context $context,
@@ -32,19 +37,23 @@ class GoogleMaps extends Template
         Registry $registry,
         ScopeConfigInterface $scopeConfig,
         SessionManagerInterface $session,
+        LocationSession $locationSession,
         CustomerSession $customerSession,
         AddressRepositoryInterface $addressRepository,
         CustomerRepositoryInterface $customerRepository,
+        LocationLogger $locationLogger,
         FormKey $formKey = null,
         array $data = []
     ) {
         $this->stockHelper = $stockHelper;
         $this->registry = $registry;
         $this->session = $session;
+        $this->locationSession = $locationSession;
         $this->scopeConfig = $scopeConfig;
         $this->customerSession = $customerSession;
         $this->addressRepository = $addressRepository;
         $this->customerRepository = $customerRepository;
+        $this->locationLogger = $locationLogger;
         $this->formKey = $formKey ?: ObjectManager::getInstance()->get(FormKey::class);
         parent::__construct($context, $data);
     }
@@ -147,12 +156,36 @@ class GoogleMaps extends Template
 
     public function getCustomerLatitude()
     {
-        return $_COOKIE['customer_latitude'] ?? null;
+        $cookieLatitude = $_COOKIE['customer_latitude'] ?? null;
+        if ($cookieLatitude !== null && $cookieLatitude !== '') {
+            return $cookieLatitude;
+        }
+
+        $sessionLatitude = $this->locationSession->getData('customer_latitude');
+        if ($sessionLatitude) {
+            return $sessionLatitude;
+        }
+
+        $fallback = $this->session->getData('customer_latitude');
+
+        return $fallback ?: null;
     }
 
     public function getCustomerLongitude()
     {
-        return $_COOKIE['customer_longitude'] ?? null;
+        $cookieLongitude = $_COOKIE['customer_longitude'] ?? null;
+        if ($cookieLongitude !== null && $cookieLongitude !== '') {
+            return $cookieLongitude;
+        }
+
+        $sessionLongitude = $this->locationSession->getData('customer_longitude');
+        if ($sessionLongitude) {
+            return $sessionLongitude;
+        }
+
+        $fallback = $this->session->getData('customer_longitude');
+
+        return $fallback ?: null;
     }
 
     public function isCustomerLoggedIn()
@@ -167,6 +200,11 @@ class GoogleMaps extends Template
      */
     public function getSelectedSourceCode()
     {
+        $sourceCode = $this->locationSession->getData('selected_source_code');
+        if ($sourceCode) {
+            return $sourceCode;
+        }
+
         return $this->session->getData('selected_source_code') ?: null;
     }
 
@@ -182,22 +220,20 @@ class GoogleMaps extends Template
                 $addressItems = $customer->getAddresses();
 
                 foreach ($addressItems as $address) {
-                    // We handle multi-line streets here:
-                    $street = $address->getStreet();
-                    $streetLine = '';
-                    if (is_array($street) && !empty($street)) {
-                        // Join multiple lines with a comma + space
-                        $streetLine = implode(', ', $street);
-                    }
-
-                    // We can build a more descriptive "details" like:
-                    // "<StreetLine>, <City>, <Region>, <CountryId>"
-                    // or keep it minimal
+                    $streetLines = $this->sanitizeStreetLines($address->getStreet());
+                    $district = $this->extractDistrict($streetLines);
                     $city = $address->getCity() ?: '';
-                    $regionText = $address->getRegion() ?: '';
+                    $regionData = $this->mapRegionData($address);
                     $countryId = $address->getCountryId() ?: '';
+                    $postcode = $address->getPostcode() ?: '';
 
-                    // latitude/longitude custom attributes
+                    $detailsParts = array_filter([
+                        $streetLines[0] ?? '',
+                        $district,
+                        $city,
+                        $regionData['region'] ?? '',
+                    ]);
+
                     $latitude = $address->getCustomAttribute('latitude')
                         ? $address->getCustomAttribute('latitude')->getValue()
                         : null;
@@ -205,15 +241,31 @@ class GoogleMaps extends Template
                         ? $address->getCustomAttribute('longitude')->getValue()
                         : null;
 
-                    $addresses[] = [
+                    $addresses[] = array_filter([
                         'id' => $address->getId(),
-                        'details' => trim("$streetLine, $city"), // or add region/country if you want
+                        'details' => implode(', ', $detailsParts),
+                        'street' => $streetLines,
+                        'district' => $district,
+                        'city' => $city,
+                        'postcode' => $postcode,
+                        'country_id' => $countryId,
+                        'region' => !empty($regionData) ? $regionData : null,
+                        'region_id' => $regionData['region_id'] ?? null,
+                        'region_code' => $regionData['region_code'] ?? null,
+                        'firstname' => $address->getFirstname(),
+                        'lastname' => $address->getLastname(),
+                        'telephone' => $address->getTelephone(),
                         'latitude' => $latitude,
                         'longitude' => $longitude,
-                        // Possibly also show if it's default shipping/billing
                         'is_default_shipping' => $address->isDefaultShipping(),
                         'is_default_billing' => $address->isDefaultBilling(),
-                    ];
+                    ], static function ($value) {
+                        if (is_array($value)) {
+                            return !empty($value);
+                        }
+
+                        return $value !== null && $value !== '';
+                    });
                 }
             } catch (\Exception $e) {
                 $this->_logger->error($e->getMessage());
@@ -257,6 +309,47 @@ class GoogleMaps extends Template
     }
 
 
+    private function sanitizeStreetLines($street): array
+    {
+        if (is_array($street)) {
+            $lines = $street;
+        } elseif ($street) {
+            $lines = [$street];
+        } else {
+            $lines = [];
+        }
+
+        $lines = array_map(static function ($line) {
+            return is_string($line) ? trim($line) : $line;
+        }, $lines);
+
+        return array_values(array_filter($lines, static function ($line) {
+            return $line !== null && $line !== '';
+        }));
+    }
+
+    private function extractDistrict(array $streetLines): ?string
+    {
+        return $streetLines[1] ?? null;
+    }
+
+    private function mapRegionData(AddressInterface $address): array
+    {
+        $region = [];
+
+        if ($address->getRegion()) {
+            $region['region'] = $address->getRegion();
+        }
+        if ($address->getRegionId()) {
+            $region['region_id'] = (int)$address->getRegionId();
+        }
+        if ($address->getRegionCode()) {
+            $region['region_code'] = $address->getRegionCode();
+        }
+
+        return $region;
+    }
+
     public function geocodeAddress($address)
     {
         $geocodeUrl = "https://maps.googleapis.com/maps/api/geocode/json?address=" . urlencode($address) . "&key=" . $this->getReferrerApiKey();
@@ -286,26 +379,45 @@ class GoogleMaps extends Template
             ];
         }
 
-        // Fetch sources data
         $sourcesData = $this->stockHelper->getAllSourcesWithHubs();
 
-        // Get default shipping address
         $defaultShippingCoords = $this->getDefaultShippingAddressCoordinates();
 
-        // Only auto-select if no source is already selected
-        $shouldAutoSelect = $defaultShippingCoords && !$this->getSelectedSourceCode();
+        $selectedSourceCode = $this->getSelectedSourceCode();
+        $shouldAutoSelect = $defaultShippingCoords && !$selectedSourceCode;
 
-        return [
+        $latitude = $this->getCustomerLatitude();
+        $longitude = $this->getCustomerLongitude();
+        $defaultLatitude = $latitude !== null ? (float)$latitude : 24.7136;
+        $defaultLongitude = $longitude !== null ? (float)$longitude : 46.6753;
+
+        $selectedBranchName = $this->locationSession->getData('selected_branch_name')
+            ?: $this->session->getData('selected_branch_name');
+        $selectedBranchPhone = $this->locationSession->getData('selected_branch_phone')
+            ?: $this->session->getData('selected_branch_phone');
+
+        $hyvaData = [
             'apiKey' => $this->getReferrerApiKey(),
             'isLoggedIn' => $this->isCustomerLoggedIn(),
-            'latitude' => $this->getCustomerLatitude(),
-            'longitude' => $this->getCustomerLongitude(),
+            'latitude' => $latitude !== null ? (float)$latitude : $defaultLatitude,
+            'longitude' => $longitude !== null ? (float)$longitude : $defaultLongitude,
+            'defaultLatitude' => $defaultLatitude,
+            'defaultLongitude' => $defaultLongitude,
             'savedAddresses' => $this->getCustomerAddresses(),
             'customerData' => $customerData,
             'sourcesData' => $sourcesData,
-            'selected_source_code' => $this->getSelectedSourceCode(),
+            'selected_source_code' => $selectedSourceCode,
+            'selected_branch_name' => $selectedBranchName,
+            'selected_branch_phone' => $selectedBranchPhone,
             'defaultShippingAddress' => $defaultShippingCoords,
             'shouldAutoSelectAddress' => $shouldAutoSelect,
+            'hasStoredLocation' => $latitude !== null && $longitude !== null,
         ];
+
+        $sanitizedLog = $hyvaData;
+        $sanitizedLog['apiKey'] = '***';
+        $this->locationLogger->debug('Prepared Hyvä map data', ['data' => $sanitizedLog]);
+
+        return $hyvaData;
     }
 }

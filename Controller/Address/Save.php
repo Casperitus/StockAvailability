@@ -8,9 +8,9 @@ use Magento\Framework\Controller\Result\JsonFactory;
 use Magento\Customer\Model\Session as CustomerSession;
 use Magento\Customer\Api\AddressRepositoryInterface;
 use Magento\Customer\Api\Data\AddressInterfaceFactory;
-use Magento\Framework\Exception\LocalizedException;
+use Madar\StockAvailability\Logger\Location as LocationLogger;
 use Magento\Directory\Model\RegionFactory;
-use Psr\Log\LoggerInterface;
+use Magento\Framework\Exception\LocalizedException;
 
 class Save extends Action
 {
@@ -19,7 +19,7 @@ class Save extends Action
     protected $addressRepository;
     protected $addressFactory;
     protected $regionFactory;
-    protected $logger;
+    protected LocationLogger $logger;
 
     public function __construct(
         Context $context,
@@ -28,7 +28,7 @@ class Save extends Action
         AddressRepositoryInterface $addressRepository,
         AddressInterfaceFactory $addressFactory,
         RegionFactory $regionFactory,
-        LoggerInterface $logger
+        LocationLogger $logger
     ) {
         parent::__construct($context);
         $this->jsonFactory = $jsonFactory;
@@ -52,7 +52,7 @@ class Save extends Action
         }
 
         $data = json_decode($this->getRequest()->getContent(), true);
-        $this->logger->info('Received data:', $data);
+        $this->logger->debug('Address save payload received', ['payload' => $data]);
 
         if (empty($data)) {
             $this->logger->error('No data received in the request.');
@@ -95,6 +95,11 @@ class Save extends Action
             // If streetRaw is a string, wrap it in array. If array, use as is.
             $streetLines = is_array($streetRaw) ? $streetRaw : [$streetRaw];
 
+            $district = isset($data['district']) ? trim((string)$data['district']) : '';
+            if ($district !== '') {
+                $streetLines[] = $district;
+            }
+
             $address->setFirstname($firstname)
                 ->setLastname($lastname)
                 ->setStreet($streetLines)
@@ -104,20 +109,50 @@ class Save extends Action
                 ->setTelephone($telephone);
 
             $this->logger->info('Set main address fields.');
+            $this->logger->debug('Street lines after normalization', ['street_lines' => $streetLines]);
 
-            // 3) Region (Uncommenting your code):
-            /* if (!empty($data['region'])) {
-                $regionName = $data['region'];
-                $countryId = $data['country_id'] ?? 'SA';
-                $region = $this->regionFactory->create()->loadByName($regionName, $countryId);
-                if ($region && $region->getId()) {
-                    $address->setRegionId($region->getId());
-                    $this->logger->info('Set region ID for ' . $regionName);
-                } else {
-                    $address->setRegion($regionName);
-                    $this->logger->info('Set region as text: ' . $regionName);
+            // Region resolution using configured directory regions
+            $countryId = $data['country_id'] ?? 'SA';
+            if (!empty($data['region'])) {
+                $regionPayload = $data['region'];
+                if (is_array($regionPayload)) {
+                    if (!empty($regionPayload['region_id'])) {
+                        $regionModel = $this->regionFactory->create()->load((int)$regionPayload['region_id']);
+                        if ($regionModel && $regionModel->getId()) {
+                            $address->setRegionId($regionModel->getId());
+                            $address->setRegion($regionModel->getName());
+                            $this->logger->info('Set region via ID ' . $regionModel->getId());
+                        }
+                    } elseif (!empty($regionPayload['region'])) {
+                        $regionModel = $this->regionFactory->create()->loadByName($regionPayload['region'], $countryId);
+                        if ($regionModel && $regionModel->getId()) {
+                            $address->setRegionId($regionModel->getId());
+                            $address->setRegion($regionModel->getName());
+                            $this->logger->info('Resolved region "' . $regionModel->getName() . '" to ID ' . $regionModel->getId());
+                        } else {
+                            $address->setRegion($regionPayload['region']);
+                            $this->logger->info('Stored region as text: ' . $regionPayload['region']);
+                        }
+                    }
+                } elseif (is_string($regionPayload)) {
+                    $regionModel = $this->regionFactory->create()->loadByName($regionPayload, $countryId);
+                    if ($regionModel && $regionModel->getId()) {
+                        $address->setRegionId($regionModel->getId());
+                        $address->setRegion($regionModel->getName());
+                        $this->logger->info('Set region using name ' . $regionModel->getName());
+                    } else {
+                        $address->setRegion($regionPayload);
+                        $this->logger->info('Stored region string: ' . $regionPayload);
+                    }
                 }
-            } */
+            } elseif (!empty($data['region_id'])) {
+                $regionModel = $this->regionFactory->create()->load((int)$data['region_id']);
+                if ($regionModel && $regionModel->getId()) {
+                    $address->setRegionId($regionModel->getId());
+                    $address->setRegion($regionModel->getName());
+                    $this->logger->info('Set region from explicit region_id ' . $regionModel->getId());
+                }
+            }
 
             // 4) Custom attributes for lat/lng
             if (!empty($data['latitude'])) {
@@ -153,15 +188,14 @@ class Save extends Action
                 $this->customerSession->setData('customer_longitude', $data['longitude']);
                 return $result->setData(['success' => true, 'message' => __('Address saved successfully.')]);
             } catch (\Exception $e) {
-                $this->logger->error('Error saving address: ' . $e->getMessage());
-                $this->logger->error($e->getTraceAsString());
+                $this->logger->error('Error saving address: ' . $e->getMessage(), ['exception' => $e]);
                 return $result->setData([
                     'error' => true,
                     'message' => __('An error occurred while saving the address.')
                 ]);
             }
         } catch (\Exception $e) {
-            $this->logger->error('Error in address processing: ' . $e->getMessage());
+            $this->logger->error('Error in address processing: ' . $e->getMessage(), ['exception' => $e]);
             return $result->setData(['error' => true, 'message' => $e->getMessage()]);
         }
     }

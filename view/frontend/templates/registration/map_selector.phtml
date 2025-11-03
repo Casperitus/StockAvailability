@@ -78,10 +78,13 @@ $hyvaData = $block->prepareHyvaData();
             selectedBranchPhone: window.registrationMapData?.selected_branch_phone || '',
             selectedSourceCode: window.registrationMapData?.selected_source_code || null,
             street: '',
+            streetLines: [],
             city: '',
             region: '',
+            regionData: null,
             postcode: '',
             country: 'SA',
+            district: '',
             isPersistingLocation: false,
             lastPersistedSignature: null,
             pendingSignature: null,
@@ -216,39 +219,92 @@ $hyvaData = $block->prepareHyvaData();
                     route: '',
                     locality: '',
                     administrative_area_level_1: '',
+                    administrative_area_level_2: '',
                     postal_code: '',
-                    country: ''
+                    country: '',
+                    country_long: '',
+                    sublocality: '',
+                    sublocality_level_1: '',
+                    sublocality_level_2: '',
+                    neighborhood: '',
+                    region_code: ''
                 };
 
-                components.forEach(component => {
-                    const type = component.types[0];
-                    if (componentMap.hasOwnProperty(type)) {
-                        componentMap[type] = component.long_name;
-                    }
-                    if (type === 'country') {
-                        componentMap.country = component.short_name;
-                    }
+                components.forEach((component) => {
+                    component.types.forEach((type) => {
+                        switch (type) {
+                            case 'street_number':
+                            case 'route':
+                            case 'locality':
+                            case 'administrative_area_level_1':
+                            case 'administrative_area_level_2':
+                            case 'postal_code':
+                            case 'sublocality':
+                            case 'sublocality_level_1':
+                            case 'sublocality_level_2':
+                            case 'neighborhood':
+                                componentMap[type] = component.long_name;
+                                break;
+                            case 'country':
+                                componentMap.country = component.short_name || component.long_name;
+                                componentMap.country_long = component.long_name;
+                                break;
+                        }
+
+                        if (type === 'administrative_area_level_1' && component.short_name) {
+                            componentMap.region_code = component.short_name;
+                        }
+                    });
                 });
 
-                // Update the actual form inputs directly
-                const street = [componentMap.street_number, componentMap.route].filter(Boolean).join(' ');
+                const primaryStreet = [componentMap.street_number, componentMap.route]
+                    .filter(Boolean)
+                    .join(' ')
+                    .trim();
+                const districtCandidate =
+                    componentMap.sublocality_level_1 ||
+                    componentMap.sublocality_level_2 ||
+                    componentMap.sublocality ||
+                    componentMap.neighborhood ||
+                    '';
 
-                this.street = street;
-                this.city = componentMap.locality || '';
+                const streetLines = primaryStreet ? [primaryStreet] : [];
+                if (districtCandidate) {
+                    streetLines.push(districtCandidate);
+                }
+
+                this.streetLines = streetLines;
+                this.street = streetLines.join(', ');
+                this.district = districtCandidate;
+                this.city = componentMap.locality || componentMap.administrative_area_level_2 || '';
                 this.region = componentMap.administrative_area_level_1 || '';
+                this.regionData = this.region
+                    ? {
+                          region: this.region,
+                          ...(componentMap.region_code ? { region_code: componentMap.region_code } : {})
+                      }
+                    : null;
                 this.postcode = componentMap.postal_code || '';
                 this.country = componentMap.country || this.country;
 
                 // Find and update the form fields by their IDs
                 const streetInput = document.getElementById('street');
+                const streetSecondInput = document.getElementById('street_2');
                 const cityInput = document.getElementById('city');
                 const regionInput = document.getElementById('region');
                 const postcodeInput = document.getElementById('postcode');
                 const countrySelect = document.querySelector('select[name="country_id"]');
 
-                if (streetInput && street) {
-                    streetInput.value = street;
+                if (streetInput && primaryStreet) {
+                    streetInput.value = primaryStreet;
                     streetInput.dispatchEvent(new Event('input', {
+                        bubbles: true
+                    }));
+                }
+
+                if (streetSecondInput && districtCandidate) {
+                    streetSecondInput.value = districtCandidate;
+                    streetSecondInput.dispatchEvent(new Event('input', {
                         bubbles: true
                     }));
                 }
@@ -284,7 +340,9 @@ $hyvaData = $block->prepareHyvaData();
                 // Also dispatch a custom event that the parent component can listen to
                 window.dispatchEvent(new CustomEvent('map-address-selected', {
                     detail: {
-                        street: street,
+                        street: primaryStreet,
+                        street_lines: streetLines,
+                        district: districtCandidate,
                         city: componentMap.locality,
                         region: componentMap.administrative_area_level_1,
                         postcode: componentMap.postal_code,
@@ -374,13 +432,45 @@ $hyvaData = $block->prepareHyvaData();
                     customer_longitude: this.longitude
                 };
 
+                const streetLines = Array.isArray(this.streetLines)
+                    ? [...this.streetLines]
+                    : this.street
+                    ? [this.street]
+                    : [];
+
+                if (this.district && !streetLines.includes(this.district)) {
+                    streetLines.push(this.district);
+                }
+
+                const regionPayload =
+                    this.regionData && Object.keys(this.regionData).length > 0
+                        ? { ...this.regionData }
+                        : this.region
+                        ? { region: this.region }
+                        : null;
+
                 const address = {
-                    street: this.street ? [this.street] : [],
+                    street: streetLines,
                     city: this.city || '',
-                    region: this.region || '',
                     postcode: this.postcode || '',
                     country_id: this.country || 'SA'
                 };
+
+                if (regionPayload) {
+                    address.region = regionPayload;
+                    if (regionPayload.region_id) {
+                        address.region_id = regionPayload.region_id;
+                    }
+                    if (regionPayload.region_code) {
+                        address.region_code = regionPayload.region_code;
+                    }
+                } else if (this.region) {
+                    address.region = this.region;
+                }
+
+                if (this.district) {
+                    address.district = this.district;
+                }
 
                 const firstnameInput = document.querySelector('input[name="firstname"]');
                 const lastnameInput = document.querySelector('input[name="lastname"]');

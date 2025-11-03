@@ -8,10 +8,10 @@ use Magento\Customer\Model\Session as CustomerSession;
 use Magento\Customer\Api\AddressRepositoryInterface;
 use Magento\Framework\Controller\Result\JsonFactory;
 use Magento\Framework\Exception\LocalizedException;
+use Madar\StockAvailability\Logger\Location as LocationLogger;
 use Magento\Framework\App\Config\ScopeConfigInterface;
-use Magento\Store\Model\ScopeInterface;
 use Magento\Framework\HTTP\Client\Curl;
-use Psr\Log\LoggerInterface;
+use Magento\Store\Model\ScopeInterface;
 
 class Get extends Action
 {
@@ -41,9 +41,9 @@ class Get extends Action
     protected $curl;
 
     /**
-     * @var LoggerInterface
+     * @var LocationLogger
      */
-    protected $logger;
+    protected LocationLogger $logger;
 
     public function __construct(
         Context $context,
@@ -52,7 +52,7 @@ class Get extends Action
         AddressRepositoryInterface $addressRepository,
         ScopeConfigInterface $scopeConfig,
         Curl $curl,
-        LoggerInterface $logger
+        LocationLogger $logger
     ) {
         parent::__construct($context);
         $this->jsonFactory       = $jsonFactory;
@@ -75,6 +75,8 @@ class Get extends Action
             $customerId = $this->customerSession->getCustomerId();
             // Optionally, you may pass an address_id via request. If not provided, use the default shipping address.
             $addressId = $this->getRequest()->getParam('address_id');
+
+            $this->logger->debug('Address get request received', ['customer_id' => $customerId, 'address_id' => $addressId]);
 
             if ($addressId) {
                 $address = $this->addressRepository->getById($addressId);
@@ -131,6 +133,7 @@ class Get extends Action
                 $geocodeUrl = "https://maps.googleapis.com/maps/api/geocode/json?address="
                     . urlencode($fullAddress) . "&key=" . $apiKey;
 
+                $this->logger->debug('Geocoding address', ['address' => $fullAddress, 'url' => $geocodeUrl]);
                 $this->curl->get($geocodeUrl);
                 $response = $this->curl->getBody();
                 $data = json_decode($response, true);
@@ -149,14 +152,16 @@ class Get extends Action
                 }
             }
 
-            $result->setData([
+            $payload = [
                 'success'   => true,
                 'latitude'  => $latitude,
                 'longitude' => $longitude,
                 'message'   => __('Coordinates retrieved successfully.')
-            ]);
+            ];
+            $this->logger->debug('Address get response', ['response' => $payload]);
+            $result->setData($payload);
         } catch (\Exception $e) {
-            $this->logger->error($e->getMessage());
+            $this->logger->error('Failed to fetch address coordinates: ' . $e->getMessage(), ['exception' => $e]);
             $result->setData([
                 'success' => false,
                 'message' => $e->getMessage()
