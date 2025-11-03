@@ -4,7 +4,5 @@
         <referenceContainer name="before.body.end">
             <block name="madar.stockavailability.configurable.js" after="options_configurable_js" template="Madar_StockAvailability::product/view/type/options/js/configurable-options.phtml"/>
         </referenceContainer>
-
-
     </body>
 </page>
