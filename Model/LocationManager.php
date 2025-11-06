@@ -9,9 +9,11 @@ use Magento\Customer\Api\AddressRepositoryInterface;
 use Magento\Customer\Api\Data\AddressInterfaceFactory;
 use Magento\Customer\Model\Session as CustomerSession;
 use Magento\Directory\Model\RegionFactory;
+use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\Quote\Api\CartRepositoryInterface;
 use Magento\Sales\Api\Data\OrderInterface;
+use Magento\Store\Model\ScopeInterface;
 
 class LocationManager
 {
@@ -33,6 +35,10 @@ class LocationManager
 
     private RegionFactory $regionFactory;
 
+    private ScopeConfigInterface $scopeConfig;
+
+    private ?string $defaultCountryId = null;
+
     /**
      * Cache resolved regions to reduce duplicate DB calls during a single request.
      *
@@ -49,6 +55,7 @@ class LocationManager
         AddressInterfaceFactory $addressFactory,
         StockHelper $stockHelper,
         RegionFactory $regionFactory,
+        ScopeConfigInterface $scopeConfig,
         LocationLogger $logger
     ) {
         $this->session = $session;
@@ -59,6 +66,7 @@ class LocationManager
         $this->addressFactory = $addressFactory;
         $this->stockHelper = $stockHelper;
         $this->regionFactory = $regionFactory;
+        $this->scopeConfig = $scopeConfig;
         $this->logger = $logger;
     }
 
@@ -239,6 +247,8 @@ class LocationManager
         $regionId = $addressData['region_id'] ?? ($regionData['region_id'] ?? null);
         $regionCode = $addressData['region_code'] ?? ($regionData['region_code'] ?? null);
 
+        $addressData['country_id'] = $this->resolveCountryId($addressData['country_id'] ?? null);
+
         return [
             'shipping_address' => [
                 'firstname' => $addressData['firstname'] ?? '',
@@ -247,7 +257,7 @@ class LocationManager
                 'street' => $addressData['street'] ?? [],
                 'city' => $addressData['city'] ?? '',
                 'postcode' => $addressData['postcode'] ?? '',
-                'country_id' => $addressData['country_id'] ?? '',
+                'country_id' => $addressData['country_id'],
                 'region' => $regionData,
                 'region_id' => $regionId,
                 'region_code' => $regionCode,
@@ -304,6 +314,8 @@ class LocationManager
             return [];
         }
 
+        $address['country_id'] = $this->resolveCountryId($address['country_id'] ?? null);
+
         $streetLines = $address['street'] ?? [];
         if (!is_array($streetLines)) {
             $streetLines = [$streetLines];
@@ -330,7 +342,7 @@ class LocationManager
 
     private function normalizeRegionData(array $address): array
     {
-        $countryId = $address['country_id'] ?? 'SA';
+        $countryId = $this->resolveCountryId($address['country_id'] ?? null);
 
         if (!empty($address['region'])) {
             if (is_array($address['region'])) {
@@ -369,6 +381,27 @@ class LocationManager
         }
 
         return $address;
+    }
+
+    private function resolveCountryId(?string $countryId): string
+    {
+        $countryId = strtoupper(trim((string)$countryId));
+
+        if ($countryId === '') {
+            $countryId = $this->getDefaultCountryId();
+        }
+
+        return $countryId;
+    }
+
+    private function getDefaultCountryId(): string
+    {
+        if ($this->defaultCountryId === null) {
+            $default = strtoupper((string)$this->scopeConfig->getValue('general/country/default', ScopeInterface::SCOPE_STORE));
+            $this->defaultCountryId = $default !== '' ? $default : 'SA';
+        }
+
+        return $this->defaultCountryId;
     }
 
     private function resolveRegionByName(string $regionName, string $countryId): array
