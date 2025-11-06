@@ -58,13 +58,18 @@ class EntityFormServicePlugin
     {
         return array_filter(
             $data,
-            static function ($value) {
+            static function ($value, $key) {
+                if ($key === 'country_id') {
+                    return true;
+                }
+
                 if (is_array($value)) {
                     return count(array_filter($value, static fn($item) => $item !== null && $item !== '')) > 0;
                 }
 
                 return $value !== null && $value !== '';
-            }
+            },
+            ARRAY_FILTER_USE_BOTH
         );
     }
 }
