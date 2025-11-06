@@ -55,12 +55,12 @@ if (!$hyvaData || !isset($hyvaData['apiKey']) || empty($hyvaData['apiKey'])) {
             type="button"
             id="delivery-location-button"
             @click="toggleModal"
-            class="group flex items-center rounded p-1 hover:bg-primary/10 outline-offset-2"
+            class="group flex items-center rounded p-1 hover:bg-primary/10 outline-offset-2 text-primary text-xs"
             aria-haspopup="dialog"
             :aria-expanded="isModalOpen"
             :disabled="isProcessing">
             <?= $heroiconsOutline->locationMarkerHtml('', 24, 24, ['aria-hidden' => 'true']) ?>
-            <span class="text-sm sr-only md:not-sr-only md:mx-1"
+            <span class="hidden md:inline text-primary mx-1"
                 x-text="selectedBranchName ? 'Branch: ' + selectedBranchName : '<?= $escaper->escapeHtml(__('Delivery Location')) ?>'">
             </span>
             <!-- Loading indicator -->
