@@ -195,7 +195,7 @@ class GoogleMaps extends Template
 
     /**
      * Retrieve the selected_source_code from our session storage
-     * 
+     *
      * @return string|null
      */
     public function getSelectedSourceCode()
