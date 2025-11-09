@@ -22,9 +22,6 @@ $eagerLoadImagesCount = (int) ($block->getData('eager_load_images_count') ?? 3);
 $productCollection = $block->getLoadedProductCollection();
 ?>
 
-<?php // REMOVED: The custom 'productVisibility' script is no longer needed. 
-?>
-
 <?php if (!$productCollection->count()): ?>
     <div class="message info empty">
         <div><?= $escaper->escapeHtml(__('We can\'t find products matching the selection.')) ?></div>
