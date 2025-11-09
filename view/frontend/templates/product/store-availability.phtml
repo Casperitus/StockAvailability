@@ -58,7 +58,7 @@ $mapsApiKey = $block->getReferrerApiKey();
     })();
 </script>
 
-<div x-data="storeAvailabilityComponent({ apiKey: <?= json_encode($mapsApiKey, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?> })" x-init="init()" class="store-availability-section border-t pt-6 mt-6">
+<div x-data='storeAvailabilityComponent({ apiKey: <?= json_encode($mapsApiKey, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP); ?> })' x-init="init()" class="store-availability-section border-t pt-6 mt-6">
     <h3 class="text-lg font-semibold mb-4"><?= $escaper->escapeHtml(__('Check availability at stores near you')) ?></h3>
 
     <!-- Location Search Input -->
