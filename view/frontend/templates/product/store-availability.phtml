@@ -6,10 +6,59 @@ if (!$product) {
     return;
 }
 
-$regions = $block->getCountryRegions('SA');
+$mapsApiKey = $block->getReferrerApiKey();
 ?>
 
-<div x-data="storeAvailabilityComponent()" x-init="init()" class="store-availability-section border-t pt-6 mt-6">
+<script>
+    (function() {
+        const apiKey = <?= json_encode($mapsApiKey, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
+
+        if (!apiKey) {
+            console.warn('[StoreAvailability] Google Maps API key is missing');
+            return;
+        }
+
+        if (window.google && window.google.maps) {
+            window._mapsApiReady = Promise.resolve(window.google.maps);
+            return;
+        }
+
+        if (!window._mapsApiReady) {
+            window._mapsApiReady = new Promise(function(resolve, reject) {
+                const callbackName = '__onGoogleMapsReady';
+                const previousCallback = window[callbackName];
+
+                window[callbackName] = function() {
+                    if (typeof previousCallback === 'function') {
+                        try {
+                            previousCallback();
+                        } catch (callbackError) {
+                            console.error(callbackError);
+                        }
+                    }
+
+                    resolve(window.google.maps);
+                };
+
+                if (document.querySelector('script[src*="maps.googleapis.com/maps/api/js"]')) {
+                    return;
+                }
+
+                const script = document.createElement('script');
+                script.src = 'https://maps.googleapis.com/maps/api/js'
+                    + '?key=' + apiKey
+                    + '&libraries=places'
+                    + '&callback=' + callbackName;
+                script.async = true;
+                script.defer = true;
+                script.onerror = reject;
+                document.head.appendChild(script);
+            });
+        }
+    })();
+</script>
+
+<div x-data='storeAvailabilityComponent({ apiKey: <?= json_encode($mapsApiKey, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP); ?> })' x-init="init()" class="store-availability-section border-t pt-6 mt-6">
     <h3 class="text-lg font-semibold mb-4"><?= $escaper->escapeHtml(__('Check availability at stores near you')) ?></h3>
 
     <!-- Location Search Input -->
@@ -18,20 +67,6 @@ $regions = $block->getCountryRegions('SA');
             <?= $escaper->escapeHtml(__('Select or enter your city or region')) ?>
         </label>
 
-        <!-- Quick Region Buttons -->
-        <?php if (!empty($regions)): ?>
-            <div class="mb-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                <?php foreach ($regions as $region): ?>
-                    <button
-                        @click="searchByRegion('<?= $escaper->escapeJs($region['name']) ?>')"
-                        class="px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-full border text-left"
-                        type="button">
-                        <?= $escaper->escapeHtml(__($region['name'])) ?>
-                    </button>
-                <?php endforeach; ?>
-            </div>
-        <?php endif; ?>
-
         <!-- Manual Location Input -->
         <div class="flex flex-col sm:flex-row gap-2">
             <input
@@ -39,6 +74,7 @@ $regions = $block->getCountryRegions('SA');
                 id="city-search"
                 x-ref="cityInput"
                 x-model="cityName"
+                autocomplete="off"
                 @keyup.enter="searchByLocation(cityName)"
                 placeholder="<?= $escaper->escapeHtmlAttr(__('Or type city or region name (Arabic or English)')) ?>"
                 class="flex-1 form-input border border-gray-300 rounded-md px-3 py-2" />
@@ -56,7 +92,7 @@ $regions = $block->getCountryRegions('SA');
             </button>
         </div>
         <p class="text-xs text-gray-500 mt-1">
-            <?= $escaper->escapeHtml(__('Click a region above or type your city or region name')) ?>
+            <?= $escaper->escapeHtml(__('Type your city or region name to search nearby stores')) ?>
         </p>
     </div>
 
@@ -184,17 +220,474 @@ $regions = $block->getCountryRegions('SA');
 </div>
 
 <script>
-    function storeAvailabilityComponent() {
+    function storeAvailabilityComponent(config = {}) {
         return {
+            apiKey: config.apiKey || '',
+            mapsApi: null,
+            geocoder: null,
+            placesService: null,
+            mapsHelperElement: null,
+            mapsLoadError: false,
             availableStores: [],
             searchPerformed: false,
             isLoading: false,
             cityName: '',
             searchedLocation: '',
             loadingMessage: '<?= $escaper->escapeJs(__('Searching...')) ?>',
+            autocomplete: null,
+            locationListener: null,
+            privateContentListener: null,
+            lastSearchedCoords: null,
+            hasBootstrappedFromDelivery: false,
 
             init() {
                 console.log('Store availability component initialized');
+
+                if (this.apiKey) {
+                    this.ensureMapsApi()
+                        .then(() => {
+                            this.setupAutocomplete();
+                        })
+                        .catch((error) => {
+                            console.error('Failed to prepare Google Maps services', error);
+                        });
+                } else {
+                    console.warn('[StoreAvailability] Google Maps API key missing – geocoding will be unavailable');
+                }
+
+                this.bindToDeliveryLocationUpdates();
+
+                this.$nextTick(() => {
+                    this.tryBootstrapFromExistingSelection();
+                });
+            },
+
+            async ensureMapsApi() {
+                if (this.mapsApi) {
+                    return this.mapsApi;
+                }
+
+                if (!window._mapsApiReady) {
+                    this.mapsLoadError = true;
+                    return null;
+                }
+
+                try {
+                    const maps = await window._mapsApiReady;
+                    this.mapsApi = maps;
+                    this.mapsLoadError = false;
+
+                    if (!this.geocoder) {
+                        this.geocoder = new maps.Geocoder();
+                    }
+
+                    if (!this.placesService && maps.places) {
+                        this.mapsHelperElement = this.mapsHelperElement || document.createElement('div');
+                        this.placesService = new maps.places.PlacesService(this.mapsHelperElement);
+                    }
+
+                    this.setupAutocomplete();
+
+                    return maps;
+                } catch (error) {
+                    this.mapsLoadError = true;
+                    console.error('[StoreAvailability] Failed to load Google Maps API', error);
+                    return null;
+                }
+            },
+
+            setupAutocomplete() {
+                if (!this.mapsApi || !this.mapsApi.places || !this.$refs.cityInput) {
+                    return;
+                }
+
+                if (this.autocomplete) {
+                    return;
+                }
+
+                try {
+                    this.autocomplete = new this.mapsApi.places.Autocomplete(this.$refs.cityInput, {
+                        componentRestrictions: { country: 'sa' },
+                        fields: ['address_components', 'formatted_address', 'geometry', 'name'],
+                        types: ['geocode']
+                    });
+
+                    this.autocomplete.addListener('place_changed', () => {
+                        this.handleAutocompleteSelection();
+                    });
+                } catch (error) {
+                    console.error('[StoreAvailability] Failed to initialise autocomplete', error);
+                }
+            },
+
+            handleAutocompleteSelection() {
+                if (!this.autocomplete) {
+                    return;
+                }
+
+                const place = typeof this.autocomplete.getPlace === 'function'
+                    ? this.autocomplete.getPlace()
+                    : null;
+
+                if (!place || !place.geometry || !place.geometry.location) {
+                    const fallback = (this.cityName || '').trim();
+                    if (fallback) {
+                        this.searchByLocation(fallback);
+                    }
+                    return;
+                }
+
+                const location = place.geometry.location;
+                const latValue = typeof location.lat === 'function' ? location.lat() : location.lat;
+                const lngValue = typeof location.lng === 'function' ? location.lng() : location.lng;
+
+                const lat = this.parseCoordinate(latValue);
+                const lng = this.parseCoordinate(lngValue);
+
+                if (lat === null || lng === null) {
+                    return;
+                }
+
+                const label = this.composePlaceLabel(place) || this.formatCoordinatesLabel(lat, lng);
+
+                this.refreshStoresForCoordinates(lat, lng, label);
+            },
+
+            composePlaceLabel(place) {
+                if (!place || typeof place !== 'object') {
+                    return '';
+                }
+
+                const formatted = (place.formatted_address || '').trim();
+                const name = (place.name || '').trim();
+
+                if (formatted && name) {
+                    if (formatted.toLowerCase().startsWith(name.toLowerCase())) {
+                        return formatted;
+                    }
+
+                    return `${name}, ${formatted}`;
+                }
+
+                return formatted || name || '';
+            },
+
+            bindToDeliveryLocationUpdates() {
+                if (!this.locationListener) {
+                    this.locationListener = (event) => this.handleExternalLocationUpdate(event);
+                    window.addEventListener('madar:location-updated', this.locationListener);
+                }
+
+                if (!this.privateContentListener) {
+                    this.privateContentListener = () => this.tryBootstrapFromExistingSelection();
+                    window.addEventListener('private-content-loaded', this.privateContentListener);
+                }
+
+                if (this.$el) {
+                    this.$el.addEventListener(
+                        'alpine:destroy',
+                        () => {
+                            if (this.locationListener) {
+                                window.removeEventListener('madar:location-updated', this.locationListener);
+                                this.locationListener = null;
+                            }
+
+                            if (this.privateContentListener) {
+                                window.removeEventListener('private-content-loaded', this.privateContentListener);
+                                this.privateContentListener = null;
+                            }
+                        },
+                        { once: true }
+                    );
+                }
+            },
+
+            tryBootstrapFromExistingSelection() {
+                if (this.hasBootstrappedFromDelivery) {
+                    return;
+                }
+
+                const snapshot = this.getExistingDeliveryLocation();
+
+                if (!snapshot) {
+                    return;
+                }
+
+                this.hasBootstrappedFromDelivery = true;
+
+                this.refreshStoresForCoordinates(snapshot.lat, snapshot.lng, snapshot.label);
+            },
+
+            getExistingDeliveryLocation() {
+                let branchData = null;
+
+                if (typeof Alpine !== 'undefined' && typeof Alpine.store === 'function') {
+                    const customerStore = Alpine.store('customerData');
+
+                    if (customerStore && customerStore.data && customerStore.data['delivery-branch']) {
+                        branchData = customerStore.data['delivery-branch'];
+                    }
+                }
+
+                const hyvaData = window.hyva && window.hyva.mapData ? window.hyva.mapData : null;
+
+                const branchLat = branchData && typeof branchData === 'object'
+                    ? (branchData.customer_latitude ?? branchData.latitude ?? branchData.lat)
+                    : undefined;
+                const branchLng = branchData && typeof branchData === 'object'
+                    ? (branchData.customer_longitude ?? branchData.longitude ?? branchData.lng)
+                    : undefined;
+
+                const lat = this.parseCoordinate(branchLat);
+                const lng = this.parseCoordinate(branchLng);
+
+                const fallbackLat = lat === null && hyvaData ? this.parseCoordinate(hyvaData.latitude) : lat;
+                const fallbackLng = lng === null && hyvaData ? this.parseCoordinate(hyvaData.longitude) : lng;
+
+                const resolvedLat = fallbackLat;
+                const resolvedLng = fallbackLng;
+
+                if (resolvedLat === null || resolvedLng === null) {
+                    return null;
+                }
+
+                const label =
+                    this.buildLocationLabel(
+                        {
+                            branch: branchData || {},
+                            shipping: {},
+                            prefill: hyvaData && hyvaData.prefill ? hyvaData.prefill : {},
+                        },
+                        resolvedLat,
+                        resolvedLng
+                    ) ||
+                    (branchData && branchData.selected_branch_name) ||
+                    (hyvaData && hyvaData.selected_branch_name) ||
+                    this.formatCoordinatesLabel(resolvedLat, resolvedLng);
+
+                return {
+                    lat: resolvedLat,
+                    lng: resolvedLng,
+                    label,
+                };
+            },
+
+            handleExternalLocationUpdate(event) {
+                if (!event || !event.detail) {
+                    return;
+                }
+
+                const { lat, lng, label } = this.extractLocationFromDetail(event.detail);
+
+                if (lat === null || lng === null) {
+                    return;
+                }
+
+                const displayLabel = label || this.formatCoordinatesLabel(lat, lng);
+
+                if (
+                    this.lastSearchedCoords &&
+                    this.coordinatesAreEqual(
+                        this.lastSearchedCoords.lat,
+                        this.lastSearchedCoords.lng,
+                        lat,
+                        lng
+                    )
+                ) {
+                    this.searchedLocation = displayLabel;
+
+                    if (!this.cityName) {
+                        this.cityName = displayLabel;
+                    }
+
+                    this.hasBootstrappedFromDelivery = true;
+
+                    return;
+                }
+
+                this.hasBootstrappedFromDelivery = true;
+                this.refreshStoresForCoordinates(lat, lng, displayLabel);
+            },
+
+            extractLocationFromDetail(detail) {
+                if (!detail || typeof detail !== 'object') {
+                    return { lat: null, lng: null, label: '' };
+                }
+
+                const branch = detail.branch || {};
+                const shipping = detail.shipping_address || {};
+                const prefill = detail.prefill || {};
+
+                const lat = this.parseCoordinate(
+                    branch.customer_latitude ??
+                    branch.latitude ??
+                    branch.lat ??
+                    shipping.latitude ??
+                    prefill.latitude ??
+                    prefill.lat
+                );
+                const lng = this.parseCoordinate(
+                    branch.customer_longitude ??
+                    branch.longitude ??
+                    branch.lng ??
+                    shipping.longitude ??
+                    prefill.longitude ??
+                    prefill.lng
+                );
+
+                const label = this.buildLocationLabel({ branch, shipping, prefill }, lat, lng);
+
+                return { lat, lng, label };
+            },
+
+            buildLocationLabel(context, lat, lng) {
+                if (!context || typeof context !== 'object') {
+                    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                        return this.formatCoordinatesLabel(lat, lng);
+                    }
+
+                    return '';
+                }
+
+                const labelParts = [];
+
+                const pushUnique = (value) => {
+                    const normalized = (value || '').toString().trim();
+
+                    if (normalized && !labelParts.includes(normalized)) {
+                        labelParts.push(normalized);
+                    }
+                };
+
+                const shipping = context.shipping || {};
+
+                if (shipping && typeof shipping === 'object') {
+                    pushUnique(shipping.district);
+                    pushUnique(shipping.city);
+
+                    if (shipping.region) {
+                        if (typeof shipping.region === 'object') {
+                            pushUnique(shipping.region.region);
+                            pushUnique(shipping.region.region_code);
+                        } else {
+                            pushUnique(shipping.region);
+                        }
+                    }
+                }
+
+                const prefill = context.prefill || {};
+
+                if (!labelParts.length && prefill && typeof prefill === 'object') {
+                    pushUnique(prefill.district);
+                    pushUnique(prefill.city);
+                    pushUnique(prefill.region);
+                }
+
+                const branch = context.branch || {};
+
+                if (!labelParts.length && branch && typeof branch === 'object') {
+                    pushUnique(branch.selected_branch_name);
+                    pushUnique(branch.branch_name);
+                }
+
+                if (labelParts.length) {
+                    return labelParts.join(', ');
+                }
+
+                if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                    return this.formatCoordinatesLabel(lat, lng);
+                }
+
+                return '';
+            },
+
+            parseCoordinate(value) {
+                if (typeof value === 'number' && Number.isFinite(value)) {
+                    return value;
+                }
+
+                if (typeof value === 'string') {
+                    const parsed = parseFloat(value);
+
+                    if (!Number.isNaN(parsed)) {
+                        return parsed;
+                    }
+                }
+
+                return null;
+            },
+
+            coordinatesAreEqual(lat1, lng1, lat2, lng2) {
+                const epsilon = 0.0001;
+
+                return (
+                    Math.abs(lat1 - lat2) < epsilon &&
+                    Math.abs(lng1 - lng2) < epsilon
+                );
+            },
+
+            formatCoordinatesLabel(lat, lng) {
+                if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+                    return '';
+                }
+
+                return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+            },
+
+            async refreshStoresForCoordinates(lat, lng, label, options = {}) {
+                const normalizedLat = this.parseCoordinate(lat);
+                const normalizedLng = this.parseCoordinate(lng);
+
+                if (normalizedLat === null || normalizedLng === null) {
+                    return;
+                }
+
+                const maintainLoading = Boolean(options.maintainLoading);
+                const keepInput = Boolean(options.keepInput);
+                const force = Boolean(options.force);
+                const customMessage = options.loadingMessage;
+
+                const displayLabel = (label || '').toString().trim()
+                    || this.formatCoordinatesLabel(normalizedLat, normalizedLng);
+
+                if (!force && this.lastSearchedCoords && this.coordinatesAreEqual(
+                    this.lastSearchedCoords.lat,
+                    this.lastSearchedCoords.lng,
+                    normalizedLat,
+                    normalizedLng
+                )) {
+                    this.searchedLocation = displayLabel;
+
+                    if (!keepInput) {
+                        this.cityName = displayLabel;
+                    }
+
+                    return;
+                }
+
+                if (!maintainLoading) {
+                    this.isLoading = true;
+                }
+
+                this.loadingMessage = customMessage
+                    || '<?= $escaper->escapeJs(__('Searching for available stores...')) ?>';
+                this.searchPerformed = true;
+                this.availableStores = [];
+                this.searchedLocation = displayLabel;
+
+                if (!keepInput) {
+                    this.cityName = displayLabel;
+                }
+
+                this.lastSearchedCoords = { lat: normalizedLat, lng: normalizedLng };
+
+                try {
+                    await this.searchAvailableStores(normalizedLat, normalizedLng);
+                } finally {
+                    if (!maintainLoading) {
+                        this.isLoading = false;
+                    }
+                }
             },
 
             // Add new method to filter stores by status
@@ -207,15 +700,7 @@ $regions = $block->getCountryRegions('SA');
                 return this.getStoresByStatus(status).length;
             },
 
-            async searchByCity(cityName) {
-                return this.searchByLocation(cityName);
-            },
-
-            async searchByRegion(regionName) {
-                return this.searchByLocation(regionName, { preferRegion: true });
-            },
-
-            async searchByLocation(placeName, { preferRegion = false } = {}) {
+            async searchByLocation(placeName) {
                 if (!placeName || !placeName.trim()) {
                     alert('<?= $escaper->escapeJs(__('Please enter a city or region name')) ?>');
                     return;
@@ -228,26 +713,35 @@ $regions = $block->getCountryRegions('SA');
                 this.availableStores = [];
                 this.searchedLocation = trimmedName;
                 this.loadingMessage = '<?= $escaper->escapeJs(__('Finding location...')) ?>';
+                this.cityName = trimmedName;
 
                 try {
-                    let coordinates = null;
-
-                    if (!preferRegion) {
-                        coordinates = await this.geocodeCity(trimmedName);
+                    if (!this.apiKey) {
+                        throw new Error('Google Maps API key not configured');
                     }
 
-                    if (!coordinates) {
-                        if (!preferRegion) {
-                            console.warn(`No city match found for ${trimmedName}, trying region search...`);
-                        }
+                    const maps = await this.ensureMapsApi();
 
+                    if (!maps || this.mapsLoadError) {
+                        throw new Error('Google Maps API unavailable');
+                    }
+
+                    let coordinates = await this.geocodeCity(trimmedName);
+
+                    if (!coordinates) {
+                        console.warn(`No city match found for ${trimmedName}, trying region search...`);
                         this.loadingMessage = '<?= $escaper->escapeJs(__('Finding region...')) ?>';
                         coordinates = await this.geocodeRegion(trimmedName);
                     }
 
                     if (coordinates) {
-                        this.loadingMessage = '<?= $escaper->escapeJs(__('Searching for available stores...')) ?>';
-                        await this.searchAvailableStores(coordinates.lat, coordinates.lng);
+                        const resolvedLabel = (coordinates.label || '').toString().trim() || trimmedName;
+                        this.cityName = resolvedLabel;
+                        await this.refreshStoresForCoordinates(coordinates.lat, coordinates.lng, resolvedLabel, {
+                            maintainLoading: true,
+                            keepInput: true,
+                            force: true
+                        });
                     } else {
                         this.availableStores = [];
                         alert('<?= $escaper->escapeJs(__('Location not found. Please check the spelling and try again.')) ?>');
@@ -264,150 +758,256 @@ $regions = $block->getCountryRegions('SA');
 
             async geocodeCity(cityName) {
                 try {
-                    const normalizedCity = this.normalizeString(cityName);
-                    // Try searching for "city" specifically first
-                    let query = encodeURIComponent(`${cityName} city, Saudi Arabia`);
-                    let response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}&limit=10&addressdetails=1&countrycodes=sa`);
-                    let results = await response.json();
+                    await this.ensureMapsApi();
 
-                    console.log(`First search for "${cityName} city":`, results.length, 'results');
+                    const queries = [
+                        `${cityName} city, Saudi Arabia`,
+                        `${cityName}, Saudi Arabia`
+                    ];
 
-                    // If no results or only administrative results, try without "city"
-                    if (!results || results.length === 0 ||
-                        (results.length > 0 && results.every(r => r.type === 'administrative' || r.addresstype === 'state'))) {
+                    const geocodeResults = await this.geocodeWithQueries(queries);
+                    const cityCandidate = this.resolveBestCandidate(geocodeResults, cityName, { preferCity: true });
 
-                        query = encodeURIComponent(`${cityName}, Saudi Arabia`);
-                        response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${query}&limit=10&addressdetails=1&countrycodes=sa`);
-                        results = await response.json();
-                        console.log(`Second search for "${cityName}":`, results.length, 'results');
+                    if (cityCandidate) {
+                        return cityCandidate;
                     }
 
-                    // If still no good results, try with specific place types
-                    if (!results || results.length === 0 ||
-                        (results.length > 0 && results.every(r => r.type === 'administrative' || r.addresstype === 'state'))) {
-
-                        // Try searching with place:city specifically
-                        const placeQuery = encodeURIComponent(`place:city ${cityName}, Saudi Arabia`);
-                        response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${placeQuery}&limit=10&addressdetails=1`);
-                        results = await response.json();
-                        console.log(`Third search with place:city:`, results.length, 'results');
-                    }
-
-                    if (results && results.length > 0) {
-                        console.log('All results:', results);
-
-                        // Find the best match - prefer actual cities/towns over administrative regions
-                        let bestResult = null;
-
-                        // First pass: look for actual cities/towns
-                        for (const result of results) {
-                            // Check place_rank - cities typically have rank 13-16
-                            if (result.place_rank >= 13 && result.place_rank <= 16 &&
-                                result.type !== 'administrative' &&
-                                result.addresstype !== 'state') {
-                                bestResult = result;
-                                console.log(`Selected by place_rank: ${result.display_name} (rank: ${result.place_rank})`);
-                                break;
-                            }
-
-                            // Check for city/town/village types
-                            if ((result.type === 'city' ||
-                                    result.type === 'town' ||
-                                    result.type === 'village' ||
-                                    result.type === 'municipality') &&
-                                result.class === 'place') {
-                                bestResult = result;
-                                console.log(`Selected by type: ${result.display_name} (type: ${result.type})`);
-                                break;
-                            }
-                        }
-
-                        // Second pass: look for results that mention city in address
-                        if (!bestResult) {
-                            for (const result of results) {
-                                if (result.address) {
-                                    const address = result.address;
-                                    const matchesCity = address.city && this.normalizeString(address.city) === normalizedCity;
-                                    const matchesTown = address.town && this.normalizeString(address.town) === normalizedCity;
-                                    const matchesDistrict = address.city_district && this.normalizeString(address.city_district) === normalizedCity;
-
-                                    if (matchesCity || matchesTown || matchesDistrict) {
-                                        bestResult = result;
-                                        console.log(`Selected by address field: ${result.display_name}`);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-
-                        // For Riyadh specifically, we know it should be around 24.7, 46.6
-                        // If we got the province coordinates, reject them
-                        if (bestResult && normalizedCity === 'riyadh') {
-                            const lat = parseFloat(bestResult.lat);
-                            const lng = parseFloat(bestResult.lon);
-
-                            // These are the province coordinates we want to avoid
-                            if (Math.abs(lat - 23.333333) < 0.1 && Math.abs(lng - 45.333333) < 0.1) {
-                                console.warn('Got Riyadh province coordinates, looking for city...');
-                                bestResult = null;
-
-                                // Look for a result closer to the actual city coordinates
-                                for (const result of results) {
-                                    const resultLat = parseFloat(result.lat);
-                                    const resultLng = parseFloat(result.lon);
-
-                                    // Check if coordinates are closer to actual Riyadh city
-                                    if (resultLat > 24 && resultLat < 25 && resultLng > 46 && resultLng < 47) {
-                                        bestResult = result;
-                                        console.log(`Found better Riyadh coordinates: ${result.display_name}`);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-
-                        if (bestResult) {
-                            const coordinates = this.getCoordinatesFromResult(bestResult);
-
-                            if (coordinates) {
-                                console.log(`Final result for ${cityName}: ${bestResult.display_name}`);
-                                console.log(`Coordinates: lat=${coordinates.lat}, lng=${coordinates.lng}`);
-                                console.log(`Type: ${bestResult.type}, Class: ${bestResult.class}, Place Rank: ${bestResult.place_rank}`);
-
-                                return coordinates;
-                            }
-                        }
-                    }
-
-                    console.warn(`No suitable city results found for ${cityName}`);
-
-                    // As a last resort for major cities, use a more specific search
-                    if (['riyadh', 'jeddah', 'makkah', 'medina', 'dammam'].includes(normalizedCity)) {
-                        console.log('Trying specific search for major city...');
-                        const specificQuery = encodeURIComponent(`${cityName} saudi arabia -region -province`);
-                        response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${specificQuery}&limit=5&addressdetails=1`);
-                        results = await response.json();
-
-                        if (results && results.length > 0) {
-                            // Take the first non-administrative result
-                            for (const result of results) {
-                                if (result.type !== 'administrative' && result.addresstype !== 'state') {
-                                    const coordinates = this.getCoordinatesFromResult(result);
-
-                                    if (coordinates) {
-                                        console.log(`Specific search found: ${result.display_name} at ${coordinates.lat}, ${coordinates.lng}`);
-                                        return coordinates;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    return null;
+                    const placesResults = await this.findPlaces(queries, { preferCity: true });
+                    return this.resolveBestCandidate(placesResults, cityName, { preferCity: true });
                 } catch (error) {
                     console.error('Geocoding error:', error);
                     return null;
                 }
+            },
+
+            async geocodeRegion(regionName) {
+                try {
+                    await this.ensureMapsApi();
+
+                    const queries = [
+                        `${regionName} region, Saudi Arabia`,
+                        `${regionName} province, Saudi Arabia`,
+                        `${regionName} governorate, Saudi Arabia`,
+                        `${regionName}, Saudi Arabia`
+                    ];
+
+                    const geocodeResults = await this.geocodeWithQueries(queries);
+                    const regionCandidate = this.resolveBestCandidate(geocodeResults, regionName, { preferRegion: true });
+
+                    if (regionCandidate) {
+                        return regionCandidate;
+                    }
+
+                    const placesResults = await this.findPlaces(queries, { preferRegion: true });
+                    return this.resolveBestCandidate(placesResults, regionName, { preferRegion: true });
+                } catch (error) {
+                    console.error('Geocoding region error:', error);
+                    return null;
+                }
+            },
+
+            async geocodeWithQueries(queries) {
+                if (!this.geocoder || !Array.isArray(queries)) {
+                    return [];
+                }
+
+                const combinedResults = [];
+
+                for (const query of queries) {
+                    const results = await this.runGeocode({
+                        address: query,
+                        componentRestrictions: { country: 'SA' }
+                    });
+
+                    if (results.length) {
+                        combinedResults.push(...results);
+                    }
+
+                    if (combinedResults.length) {
+                        break;
+                    }
+                }
+
+                return combinedResults;
+            },
+
+            async findPlaces(queries, preference = {}) {
+                if (!this.placesService || !Array.isArray(queries)) {
+                    return [];
+                }
+
+                const combinedResults = [];
+
+                for (const query of queries) {
+                    const results = await this.runPlacesQuery(query);
+
+                    if (results.length) {
+                        combinedResults.push(...results);
+                    }
+
+                    if (combinedResults.length) {
+                        break;
+                    }
+                }
+
+                return combinedResults;
+            },
+
+            runGeocode(request) {
+                return new Promise((resolve) => {
+                    if (!this.geocoder) {
+                        resolve([]);
+                        return;
+                    }
+
+                    this.geocoder.geocode(request, (results, status) => {
+                        if (status === 'OK' && Array.isArray(results)) {
+                            resolve(results);
+                        } else {
+                            resolve([]);
+                        }
+                    });
+                });
+            },
+
+            runPlacesQuery(query) {
+                return new Promise((resolve) => {
+                    if (!this.placesService) {
+                        resolve([]);
+                        return;
+                    }
+
+                    const request = {
+                        query,
+                        fields: ['name', 'geometry', 'formatted_address', 'types']
+                    };
+
+                    this.placesService.findPlaceFromQuery(request, (results, status) => {
+                        const maps = this.mapsApi;
+                        const okStatus = maps && maps.places ? maps.places.PlacesServiceStatus.OK : 'OK';
+
+                        if (status === okStatus && Array.isArray(results)) {
+                            resolve(results);
+                        } else {
+                            resolve([]);
+                        }
+                    });
+                });
+            },
+
+            resolveBestCandidate(results, searchTerm, preference = {}) {
+                if (!Array.isArray(results) || results.length === 0) {
+                    return null;
+                }
+
+                const normalizedTerm = this.normalizeString(searchTerm);
+                const cityPriority = ['locality', 'sublocality', 'postal_town', 'administrative_area_level_2'];
+                const regionPriority = ['administrative_area_level_1', 'administrative_area_level_2', 'administrative_area_level_3'];
+
+                const preferredTypes = preference.preferCity ? cityPriority : regionPriority;
+                const secondaryTypes = preference.preferCity ? regionPriority : cityPriority;
+
+                const matchesTerm = results.filter((result) => this.resultMatchesTerm(result, normalizedTerm));
+
+                const matchWithPreferredType = matchesTerm.find((result) => this.resultHasType(result, preferredTypes));
+                if (matchWithPreferredType) {
+                    return this.buildCandidate(matchWithPreferredType, searchTerm);
+                }
+
+                const anyPreferredType = results.find((result) => this.resultHasType(result, preferredTypes));
+                if (anyPreferredType) {
+                    return this.buildCandidate(anyPreferredType, searchTerm);
+                }
+
+                const matchWithSecondaryType = matchesTerm.find((result) => this.resultHasType(result, secondaryTypes));
+                if (matchWithSecondaryType) {
+                    return this.buildCandidate(matchWithSecondaryType, searchTerm);
+                }
+
+                if (matchesTerm.length > 0) {
+                    return this.buildCandidate(matchesTerm[0], searchTerm);
+                }
+
+                return this.buildCandidate(results[0], searchTerm);
+            },
+
+            buildCandidate(result, fallbackLabel) {
+                if (!result || !result.geometry) {
+                    return null;
+                }
+
+                const coordinates = this.extractCoordinates(result.geometry);
+
+                if (!coordinates) {
+                    return null;
+                }
+
+                return {
+                    ...coordinates,
+                    label: result.formatted_address || result.name || fallbackLabel
+                };
+            },
+
+            resultHasType(result, preferredTypes) {
+                if (!Array.isArray(preferredTypes) || preferredTypes.length === 0) {
+                    return false;
+                }
+
+                const types = Array.isArray(result.types) ? result.types : [];
+                return types.some((type) => preferredTypes.includes(type));
+            },
+
+            resultMatchesTerm(result, normalizedTerm) {
+                if (!normalizedTerm) {
+                    return false;
+                }
+
+                const formattedAddress = this.normalizeString(result.formatted_address);
+                if (formattedAddress && formattedAddress.includes(normalizedTerm)) {
+                    return true;
+                }
+
+                if (result.name && this.normalizeString(result.name).includes(normalizedTerm)) {
+                    return true;
+                }
+
+                const components = Array.isArray(result.address_components) ? result.address_components : [];
+                return components.some((component) => {
+                    const longName = this.normalizeString(component.long_name);
+                    const shortName = this.normalizeString(component.short_name);
+                    return longName === normalizedTerm || shortName === normalizedTerm;
+                });
+            },
+
+            extractCoordinates(geometry) {
+                if (!geometry) {
+                    return null;
+                }
+
+                if (geometry.location) {
+                    const lat = typeof geometry.location.lat === 'function' ? geometry.location.lat() : geometry.location.lat;
+                    const lng = typeof geometry.location.lng === 'function' ? geometry.location.lng() : geometry.location.lng;
+
+                    if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
+                        return { lat, lng };
+                    }
+                }
+
+                if (geometry.viewport && typeof geometry.viewport.getCenter === 'function') {
+                    const center = geometry.viewport.getCenter();
+                    return { lat: center.lat(), lng: center.lng() };
+                }
+
+                if (geometry.bounds && typeof geometry.bounds.getCenter === 'function') {
+                    const center = geometry.bounds.getCenter();
+                    return { lat: center.lat(), lng: center.lng() };
+                }
+
+                return null;
+            },
+
+            normalizeString(value) {
+                return (value || '').toString().trim().toLowerCase();
             },
 
             async geocodeRegion(regionName) {
@@ -579,34 +1179,44 @@ $regions = $block->getCountryRegions('SA');
                 }
             },
 
-            useCurrentLocation() {
-                if (navigator.geolocation) {
-                    this.isLoading = true;
-                    this.searchPerformed = true;
-                    this.searchedLocation = '<?= $escaper->escapeJs(__('your current location')) ?>';
-                    this.loadingMessage = '<?= $escaper->escapeJs(__('Getting your location...')) ?>';
+            async useCurrentLocation() {
+                if (!navigator.geolocation) {
+                    alert('<?= $escaper->escapeJs(__('Location services not supported. Please select a city from the list above.')) ?>');
+                    return;
+                }
 
-                    navigator.geolocation.getCurrentPosition(
-                        (position) => {
-                            console.log('Current location found:', position.coords.latitude, position.coords.longitude);
-                            this.loadingMessage = '<?= $escaper->escapeJs(__('Searching for available stores...')) ?>';
-                            this.searchAvailableStores(
-                                position.coords.latitude,
-                                position.coords.longitude
-                            );
-                        },
-                        (error) => {
-                            console.error('Geolocation error:', error);
-                            alert('<?= $escaper->escapeJs(__('Unable to get your location. Please select a city from the list above.')) ?>');
-                            this.isLoading = false;
-                        }, {
+                this.isLoading = true;
+                this.searchPerformed = true;
+                const currentLocationLabel = '<?= $escaper->escapeJs(__('your current location')) ?>';
+                this.searchedLocation = currentLocationLabel;
+                this.loadingMessage = '<?= $escaper->escapeJs(__('Getting your location...')) ?>';
+                this.cityName = currentLocationLabel;
+
+                try {
+                    const position = await new Promise((resolve, reject) => {
+                        navigator.geolocation.getCurrentPosition(resolve, reject, {
                             enableHighAccuracy: true,
                             timeout: 10000,
                             maximumAge: 60000
+                        });
+                    });
+
+                    console.log('Current location found:', position.coords.latitude, position.coords.longitude);
+                    await this.refreshStoresForCoordinates(
+                        position.coords.latitude,
+                        position.coords.longitude,
+                        currentLocationLabel,
+                        {
+                            maintainLoading: true,
+                            keepInput: true,
+                            force: true
                         }
                     );
-                } else {
-                    alert('<?= $escaper->escapeJs(__('Location services not supported. Please select a city from the list above.')) ?>');
+                } catch (error) {
+                    console.error('Geolocation error:', error);
+                    alert('<?= $escaper->escapeJs(__('Unable to get your location. Please select a city from the list above.')) ?>');
+                } finally {
+                    this.isLoading = false;
                 }
             },
 

@@ -120,10 +120,11 @@ function mapComponent(_hyvaData) {
 				window.mapCompPrivateContentLoaded = true;
 			}
 			// Auto-select default shipping address if conditions are met
-			if (hyvaData.shouldAutoSelectAddress && hyvaData.defaultShippingAddress) {
-				this.autoSelectDefaultAddress();
-			}
-		},
+                        if (hyvaData.shouldAutoSelectAddress && hyvaData.defaultShippingAddress) {
+                                this.autoSelectDefaultAddress();
+                        }
+
+                },
 
 		// --- Data Fetching & Updating (primarily from newer, refined versions) ---
 		async fetchDeliveryBranchData() {
@@ -187,18 +188,18 @@ function mapComponent(_hyvaData) {
                                 }
 				const newLat = parseFloat(deliveryBranchData.customer_latitude);
 				const newLng = parseFloat(deliveryBranchData.customer_longitude);
-				if (
-					!isNaN(newLat) &&
-					!isNaN(newLng) &&
-					(newLat !== 0 || newLng !== 0)
-				) {
-					this.latitude = newLat;
-					this.longitude = newLng;
-					this.lastValidCoordinates = {
-						lat: this.latitude,
-						lng: this.longitude,
-					};
-				}
+                                if (
+                                        !isNaN(newLat) &&
+                                        !isNaN(newLng) &&
+                                        (newLat !== 0 || newLng !== 0)
+                                ) {
+                                        this.latitude = newLat;
+                                        this.longitude = newLng;
+                                        this.lastValidCoordinates = {
+                                                lat: this.latitude,
+                                                lng: this.longitude,
+                                        };
+                                }
 				if (
 					!this.selectedSourceCode &&
 					this._isLoggedIn &&
@@ -238,10 +239,11 @@ function mapComponent(_hyvaData) {
 					this.isProcessing = true;
 
 					// Update coordinates
-					this.updateCoordinates(
-						parseFloat(defaultAddress.latitude),
-						parseFloat(defaultAddress.longitude)
-					);
+                                        this.updateCoordinates(
+                                                parseFloat(defaultAddress.latitude),
+                                                parseFloat(defaultAddress.longitude),
+                                                { resetFit: true }
+                                        );
 
 					// Find nearest branch
 					const nearestBranch = this.findNearestBranch(
@@ -566,15 +568,15 @@ function mapComponent(_hyvaData) {
 			};
 
 			try {
-				this.map = new google.maps.Map(mapContainer, mapOptions);
-				this.googleMapsApiLoaded = true; // Set flag here upon successful map creation
+                                this.map = new google.maps.Map(mapContainer, mapOptions);
+                                this.googleMapsApiLoaded = true; // Set flag here upon successful map creation
 
-				this.createMarker(center); // createMarker from newer version
-				this.initAutocomplete(); // initAutocomplete from newer version
+                                this.createMarker(center); // createMarker from newer version
+                                this.initAutocomplete(); // initAutocomplete from newer version
 
-				// Geocode only if address isn't set and coords are valid (from newer version)
-				// Check this.currentAddress against the value derived from lat/lng
-				// If currentAddress is empty OR geocoding gives a different one, then update it.
+                                // Geocode only if address isn't set and coords are valid (from newer version)
+                                // Check this.currentAddress against the value derived from lat/lng
+                                // If currentAddress is empty OR geocoding gives a different one, then update it.
                                 if (
                                         !this.currentAddress &&
                                         this.hasStoredSelection &&
@@ -618,7 +620,7 @@ function mapComponent(_hyvaData) {
 					return;
 				}
 				const location = place.geometry.location;
-				this.updateCoordinates(location.lat(), location.lng()); // Central update
+                                this.updateCoordinates(location.lat(), location.lng(), { resetFit: true }); // Central update
 				this.map.setCenter(location);
 				if (this.marker) this.marker.setPosition(location);
 				else this.createMarker(location);
@@ -734,7 +736,8 @@ function mapComponent(_hyvaData) {
                         this.selectedAddress = address;
                         this.updateCoordinates(
                                 parseFloat(address.latitude),
-                                parseFloat(address.longitude)
+                                parseFloat(address.longitude),
+                                { resetFit: true }
                         );
                         const streetLines = Array.isArray(address.street)
                                 ? address.street.filter((line) => typeof line === "string" && line.trim() !== "")
@@ -812,12 +815,13 @@ function mapComponent(_hyvaData) {
 			if (savedAddr) {
 				// Auto-select without opening modal
 				this.selectAddress(savedAddr);
-			} else {
-				// If not found in saved list, still update coordinates
-				this.updateCoordinates(
-					parseFloat(defaultAddr.latitude),
-					parseFloat(defaultAddr.longitude)
-				);
+                        } else {
+                                // If not found in saved list, still update coordinates
+                                this.updateCoordinates(
+                                        parseFloat(defaultAddr.latitude),
+                                        parseFloat(defaultAddr.longitude),
+                                        { resetFit: true }
+                                );
 
 				// Find nearest branch
 				const nearestBranch = this.findNearestBranch(
@@ -842,11 +846,11 @@ function mapComponent(_hyvaData) {
 		},
 
 		// --- Helper methods (merged from old and new) ---
-		findNearestBranch(lat, lng, sourcesData) {
-			if (!sourcesData || sourcesData.length === 0) return null;
-			let nearestBranch = null;
-			let shortestDistance = Infinity;
-			sourcesData.forEach((source) => {
+                findNearestBranch(lat, lng, sourcesData) {
+                        if (!sourcesData || sourcesData.length === 0) return null;
+                        let nearestBranch = null;
+                        let shortestDistance = Infinity;
+                        sourcesData.forEach((source) => {
 				if (!source.latitude || !source.longitude || !source.delivery_range_km)
 					return;
 				const distance = this.calculateDistance(
@@ -860,13 +864,13 @@ function mapComponent(_hyvaData) {
 					shortestDistance = distance;
 					nearestBranch = source;
 				}
-			});
-			return nearestBranch;
-		},
-		calculateDistance(lat1, lng1, lat2, lng2) {
-			const R = 6371;
-			const φ1 = (lat1 * Math.PI) / 180,
-				φ2 = (lat2 * Math.PI) / 180,
+                        });
+                        return nearestBranch;
+                },
+                calculateDistance(lat1, lng1, lat2, lng2) {
+                        const R = 6371;
+                        const φ1 = (lat1 * Math.PI) / 180,
+                                φ2 = (lat2 * Math.PI) / 180,
 				Δφ = ((lat2 - lat1) * Math.PI) / 180,
 				Δλ = ((lng2 - lng1) * Math.PI) / 180;
 			const a =
@@ -878,12 +882,12 @@ function mapComponent(_hyvaData) {
 		degreesToRadians(degrees) {
 			return degrees * (Math.PI / 180);
 		},
-		updateCoordinates(lat, lng) {
-			this.latitude = lat;
-			this.longitude = lng;
-			this.lastValidCoordinates = { lat, lng };
-			this.isAddressValid = true;
-		}, // From newer
+                updateCoordinates(lat, lng, options = {}) {
+                        this.latitude = lat;
+                        this.longitude = lng;
+                        this.lastValidCoordinates = { lat, lng };
+                        this.isAddressValid = true;
+                }, // From newer
                 parseAddressComponents(components) {
                         if (!components) return;
 
@@ -1015,17 +1019,17 @@ function mapComponent(_hyvaData) {
 			)
 				return;
 			if (this.marker) this.marker.setMap(null);
-			this.marker = new google.maps.Marker({
-				position,
-				map: this.map,
-				draggable: true,
-				title: "Delivery Location",
-			});
-			this.marker.addListener("dragend", (e) => {
-				this.updateCoordinates(e.latLng.lat(), e.latLng.lng());
-				this.reverseGeocodeAddress();
-			});
-		},
+                        this.marker = new google.maps.Marker({
+                                position,
+                                map: this.map,
+                                draggable: true,
+                                title: "Delivery Location",
+                        });
+                        this.marker.addListener("dragend", (e) => {
+                                this.updateCoordinates(e.latLng.lat(), e.latLng.lng(), { skipFit: true });
+                                this.reverseGeocodeAddress();
+                        });
+                },
 		useCurrentLocation() {
 			/* ... from newer, already included above ... */ if (
 				!navigator.geolocation
@@ -1035,12 +1039,12 @@ function mapComponent(_hyvaData) {
 			}
 			this.isProcessing = true;
 			navigator.geolocation.getCurrentPosition(
-				(p) => {
-					this.updateCoordinates(p.coords.latitude, p.coords.longitude);
-					if (this.map) {
-						const nc = { lat: this.latitude, lng: this.longitude };
-						this.map.setCenter(nc);
-						if (this.marker) this.marker.setPosition(nc);
+                                (p) => {
+                                        this.updateCoordinates(p.coords.latitude, p.coords.longitude, { resetFit: true });
+                                        if (this.map) {
+                                                const nc = { lat: this.latitude, lng: this.longitude };
+                                                this.map.setCenter(nc);
+                                                if (this.marker) this.marker.setPosition(nc);
 						else this.createMarker(nc);
 						this.reverseGeocodeAddress();
 					}
@@ -1066,11 +1070,12 @@ function mapComponent(_hyvaData) {
 				address &&
 				typeof address.latitude !== "undefined"
 			) {
-				this.selectedAddress = address;
-				this.updateCoordinates(
-					parseFloat(address.latitude),
-					parseFloat(address.longitude)
-				);
+                                this.selectedAddress = address;
+                                this.updateCoordinates(
+                                        parseFloat(address.latitude),
+                                        parseFloat(address.longitude),
+                                        { resetFit: true }
+                                );
 				this.currentAddress =
 					address.details || `${address.street}, ${address.city}`;
 				this.street = address.street || "";
