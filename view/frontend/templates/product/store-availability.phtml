@@ -74,6 +74,7 @@ $mapsApiKey = $block->getReferrerApiKey();
                 id="city-search"
                 x-ref="cityInput"
                 x-model="cityName"
+                autocomplete="off"
                 @keyup.enter="searchByLocation(cityName)"
                 placeholder="<?= $escaper->escapeHtmlAttr(__('Or type city or region name (Arabic or English)')) ?>"
                 class="flex-1 form-input border border-gray-300 rounded-md px-3 py-2" />
@@ -233,17 +234,32 @@ $mapsApiKey = $block->getReferrerApiKey();
             cityName: '',
             searchedLocation: '',
             loadingMessage: '<?= $escaper->escapeJs(__('Searching...')) ?>',
+            autocomplete: null,
+            locationListener: null,
+            privateContentListener: null,
+            lastSearchedCoords: null,
+            hasBootstrappedFromDelivery: false,
 
             init() {
                 console.log('Store availability component initialized');
 
                 if (this.apiKey) {
-                    this.ensureMapsApi().catch((error) => {
-                        console.error('Failed to prepare Google Maps services', error);
-                    });
+                    this.ensureMapsApi()
+                        .then(() => {
+                            this.setupAutocomplete();
+                        })
+                        .catch((error) => {
+                            console.error('Failed to prepare Google Maps services', error);
+                        });
                 } else {
                     console.warn('[StoreAvailability] Google Maps API key missing – geocoding will be unavailable');
                 }
+
+                this.bindToDeliveryLocationUpdates();
+
+                this.$nextTick(() => {
+                    this.tryBootstrapFromExistingSelection();
+                });
             },
 
             async ensureMapsApi() {
@@ -270,11 +286,407 @@ $mapsApiKey = $block->getReferrerApiKey();
                         this.placesService = new maps.places.PlacesService(this.mapsHelperElement);
                     }
 
+                    this.setupAutocomplete();
+
                     return maps;
                 } catch (error) {
                     this.mapsLoadError = true;
                     console.error('[StoreAvailability] Failed to load Google Maps API', error);
                     return null;
+                }
+            },
+
+            setupAutocomplete() {
+                if (!this.mapsApi || !this.mapsApi.places || !this.$refs.cityInput) {
+                    return;
+                }
+
+                if (this.autocomplete) {
+                    return;
+                }
+
+                try {
+                    this.autocomplete = new this.mapsApi.places.Autocomplete(this.$refs.cityInput, {
+                        componentRestrictions: { country: 'sa' },
+                        fields: ['address_components', 'formatted_address', 'geometry', 'name'],
+                        types: ['geocode']
+                    });
+
+                    this.autocomplete.addListener('place_changed', () => {
+                        this.handleAutocompleteSelection();
+                    });
+                } catch (error) {
+                    console.error('[StoreAvailability] Failed to initialise autocomplete', error);
+                }
+            },
+
+            handleAutocompleteSelection() {
+                if (!this.autocomplete) {
+                    return;
+                }
+
+                const place = typeof this.autocomplete.getPlace === 'function'
+                    ? this.autocomplete.getPlace()
+                    : null;
+
+                if (!place || !place.geometry || !place.geometry.location) {
+                    const fallback = (this.cityName || '').trim();
+                    if (fallback) {
+                        this.searchByLocation(fallback);
+                    }
+                    return;
+                }
+
+                const location = place.geometry.location;
+                const latValue = typeof location.lat === 'function' ? location.lat() : location.lat;
+                const lngValue = typeof location.lng === 'function' ? location.lng() : location.lng;
+
+                const lat = this.parseCoordinate(latValue);
+                const lng = this.parseCoordinate(lngValue);
+
+                if (lat === null || lng === null) {
+                    return;
+                }
+
+                const label = this.composePlaceLabel(place) || this.formatCoordinatesLabel(lat, lng);
+
+                this.refreshStoresForCoordinates(lat, lng, label);
+            },
+
+            composePlaceLabel(place) {
+                if (!place || typeof place !== 'object') {
+                    return '';
+                }
+
+                const formatted = (place.formatted_address || '').trim();
+                const name = (place.name || '').trim();
+
+                if (formatted && name) {
+                    if (formatted.toLowerCase().startsWith(name.toLowerCase())) {
+                        return formatted;
+                    }
+
+                    return `${name}, ${formatted}`;
+                }
+
+                return formatted || name || '';
+            },
+
+            bindToDeliveryLocationUpdates() {
+                if (!this.locationListener) {
+                    this.locationListener = (event) => this.handleExternalLocationUpdate(event);
+                    window.addEventListener('madar:location-updated', this.locationListener);
+                }
+
+                if (!this.privateContentListener) {
+                    this.privateContentListener = () => this.tryBootstrapFromExistingSelection();
+                    window.addEventListener('private-content-loaded', this.privateContentListener);
+                }
+
+                if (this.$el) {
+                    this.$el.addEventListener(
+                        'alpine:destroy',
+                        () => {
+                            if (this.locationListener) {
+                                window.removeEventListener('madar:location-updated', this.locationListener);
+                                this.locationListener = null;
+                            }
+
+                            if (this.privateContentListener) {
+                                window.removeEventListener('private-content-loaded', this.privateContentListener);
+                                this.privateContentListener = null;
+                            }
+                        },
+                        { once: true }
+                    );
+                }
+            },
+
+            tryBootstrapFromExistingSelection() {
+                if (this.hasBootstrappedFromDelivery) {
+                    return;
+                }
+
+                const snapshot = this.getExistingDeliveryLocation();
+
+                if (!snapshot) {
+                    return;
+                }
+
+                this.hasBootstrappedFromDelivery = true;
+
+                this.refreshStoresForCoordinates(snapshot.lat, snapshot.lng, snapshot.label);
+            },
+
+            getExistingDeliveryLocation() {
+                let branchData = null;
+
+                if (typeof Alpine !== 'undefined' && typeof Alpine.store === 'function') {
+                    const customerStore = Alpine.store('customerData');
+
+                    if (customerStore && customerStore.data && customerStore.data['delivery-branch']) {
+                        branchData = customerStore.data['delivery-branch'];
+                    }
+                }
+
+                const hyvaData = window.hyva && window.hyva.mapData ? window.hyva.mapData : null;
+
+                const branchLat = branchData && typeof branchData === 'object'
+                    ? (branchData.customer_latitude ?? branchData.latitude ?? branchData.lat)
+                    : undefined;
+                const branchLng = branchData && typeof branchData === 'object'
+                    ? (branchData.customer_longitude ?? branchData.longitude ?? branchData.lng)
+                    : undefined;
+
+                const lat = this.parseCoordinate(branchLat);
+                const lng = this.parseCoordinate(branchLng);
+
+                const fallbackLat = lat === null && hyvaData ? this.parseCoordinate(hyvaData.latitude) : lat;
+                const fallbackLng = lng === null && hyvaData ? this.parseCoordinate(hyvaData.longitude) : lng;
+
+                const resolvedLat = fallbackLat;
+                const resolvedLng = fallbackLng;
+
+                if (resolvedLat === null || resolvedLng === null) {
+                    return null;
+                }
+
+                const label =
+                    this.buildLocationLabel(
+                        {
+                            branch: branchData || {},
+                            shipping: {},
+                            prefill: hyvaData && hyvaData.prefill ? hyvaData.prefill : {},
+                        },
+                        resolvedLat,
+                        resolvedLng
+                    ) ||
+                    (branchData && branchData.selected_branch_name) ||
+                    (hyvaData && hyvaData.selected_branch_name) ||
+                    this.formatCoordinatesLabel(resolvedLat, resolvedLng);
+
+                return {
+                    lat: resolvedLat,
+                    lng: resolvedLng,
+                    label,
+                };
+            },
+
+            handleExternalLocationUpdate(event) {
+                if (!event || !event.detail) {
+                    return;
+                }
+
+                const { lat, lng, label } = this.extractLocationFromDetail(event.detail);
+
+                if (lat === null || lng === null) {
+                    return;
+                }
+
+                const displayLabel = label || this.formatCoordinatesLabel(lat, lng);
+
+                if (
+                    this.lastSearchedCoords &&
+                    this.coordinatesAreEqual(
+                        this.lastSearchedCoords.lat,
+                        this.lastSearchedCoords.lng,
+                        lat,
+                        lng
+                    )
+                ) {
+                    this.searchedLocation = displayLabel;
+
+                    if (!this.cityName) {
+                        this.cityName = displayLabel;
+                    }
+
+                    this.hasBootstrappedFromDelivery = true;
+
+                    return;
+                }
+
+                this.hasBootstrappedFromDelivery = true;
+                this.refreshStoresForCoordinates(lat, lng, displayLabel);
+            },
+
+            extractLocationFromDetail(detail) {
+                if (!detail || typeof detail !== 'object') {
+                    return { lat: null, lng: null, label: '' };
+                }
+
+                const branch = detail.branch || {};
+                const shipping = detail.shipping_address || {};
+                const prefill = detail.prefill || {};
+
+                const lat = this.parseCoordinate(
+                    branch.customer_latitude ??
+                    branch.latitude ??
+                    branch.lat ??
+                    shipping.latitude ??
+                    prefill.latitude ??
+                    prefill.lat
+                );
+                const lng = this.parseCoordinate(
+                    branch.customer_longitude ??
+                    branch.longitude ??
+                    branch.lng ??
+                    shipping.longitude ??
+                    prefill.longitude ??
+                    prefill.lng
+                );
+
+                const label = this.buildLocationLabel({ branch, shipping, prefill }, lat, lng);
+
+                return { lat, lng, label };
+            },
+
+            buildLocationLabel(context, lat, lng) {
+                if (!context || typeof context !== 'object') {
+                    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                        return this.formatCoordinatesLabel(lat, lng);
+                    }
+
+                    return '';
+                }
+
+                const labelParts = [];
+
+                const pushUnique = (value) => {
+                    const normalized = (value || '').toString().trim();
+
+                    if (normalized && !labelParts.includes(normalized)) {
+                        labelParts.push(normalized);
+                    }
+                };
+
+                const shipping = context.shipping || {};
+
+                if (shipping && typeof shipping === 'object') {
+                    pushUnique(shipping.district);
+                    pushUnique(shipping.city);
+
+                    if (shipping.region) {
+                        if (typeof shipping.region === 'object') {
+                            pushUnique(shipping.region.region);
+                            pushUnique(shipping.region.region_code);
+                        } else {
+                            pushUnique(shipping.region);
+                        }
+                    }
+                }
+
+                const prefill = context.prefill || {};
+
+                if (!labelParts.length && prefill && typeof prefill === 'object') {
+                    pushUnique(prefill.district);
+                    pushUnique(prefill.city);
+                    pushUnique(prefill.region);
+                }
+
+                const branch = context.branch || {};
+
+                if (!labelParts.length && branch && typeof branch === 'object') {
+                    pushUnique(branch.selected_branch_name);
+                    pushUnique(branch.branch_name);
+                }
+
+                if (labelParts.length) {
+                    return labelParts.join(', ');
+                }
+
+                if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                    return this.formatCoordinatesLabel(lat, lng);
+                }
+
+                return '';
+            },
+
+            parseCoordinate(value) {
+                if (typeof value === 'number' && Number.isFinite(value)) {
+                    return value;
+                }
+
+                if (typeof value === 'string') {
+                    const parsed = parseFloat(value);
+
+                    if (!Number.isNaN(parsed)) {
+                        return parsed;
+                    }
+                }
+
+                return null;
+            },
+
+            coordinatesAreEqual(lat1, lng1, lat2, lng2) {
+                const epsilon = 0.0001;
+
+                return (
+                    Math.abs(lat1 - lat2) < epsilon &&
+                    Math.abs(lng1 - lng2) < epsilon
+                );
+            },
+
+            formatCoordinatesLabel(lat, lng) {
+                if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+                    return '';
+                }
+
+                return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+            },
+
+            async refreshStoresForCoordinates(lat, lng, label, options = {}) {
+                const normalizedLat = this.parseCoordinate(lat);
+                const normalizedLng = this.parseCoordinate(lng);
+
+                if (normalizedLat === null || normalizedLng === null) {
+                    return;
+                }
+
+                const maintainLoading = Boolean(options.maintainLoading);
+                const keepInput = Boolean(options.keepInput);
+                const force = Boolean(options.force);
+                const customMessage = options.loadingMessage;
+
+                const displayLabel = (label || '').toString().trim()
+                    || this.formatCoordinatesLabel(normalizedLat, normalizedLng);
+
+                if (!force && this.lastSearchedCoords && this.coordinatesAreEqual(
+                    this.lastSearchedCoords.lat,
+                    this.lastSearchedCoords.lng,
+                    normalizedLat,
+                    normalizedLng
+                )) {
+                    this.searchedLocation = displayLabel;
+
+                    if (!keepInput) {
+                        this.cityName = displayLabel;
+                    }
+
+                    return;
+                }
+
+                if (!maintainLoading) {
+                    this.isLoading = true;
+                }
+
+                this.loadingMessage = customMessage
+                    || '<?= $escaper->escapeJs(__('Searching for available stores...')) ?>';
+                this.searchPerformed = true;
+                this.availableStores = [];
+                this.searchedLocation = displayLabel;
+
+                if (!keepInput) {
+                    this.cityName = displayLabel;
+                }
+
+                this.lastSearchedCoords = { lat: normalizedLat, lng: normalizedLng };
+
+                try {
+                    await this.searchAvailableStores(normalizedLat, normalizedLng);
+                } finally {
+                    if (!maintainLoading) {
+                        this.isLoading = false;
+                    }
                 }
             },
 
@@ -301,6 +713,7 @@ $mapsApiKey = $block->getReferrerApiKey();
                 this.availableStores = [];
                 this.searchedLocation = trimmedName;
                 this.loadingMessage = '<?= $escaper->escapeJs(__('Finding location...')) ?>';
+                this.cityName = trimmedName;
 
                 try {
                     if (!this.apiKey) {
@@ -322,9 +735,13 @@ $mapsApiKey = $block->getReferrerApiKey();
                     }
 
                     if (coordinates) {
-                        this.loadingMessage = '<?= $escaper->escapeJs(__('Searching for available stores...')) ?>';
-                        this.searchedLocation = coordinates.label || trimmedName;
-                        await this.searchAvailableStores(coordinates.lat, coordinates.lng);
+                        const resolvedLabel = (coordinates.label || '').toString().trim() || trimmedName;
+                        this.cityName = resolvedLabel;
+                        await this.refreshStoresForCoordinates(coordinates.lat, coordinates.lng, resolvedLabel, {
+                            maintainLoading: true,
+                            keepInput: true,
+                            force: true
+                        });
                     } else {
                         this.availableStores = [];
                         alert('<?= $escaper->escapeJs(__('Location not found. Please check the spelling and try again.')) ?>');
@@ -647,8 +1064,10 @@ $mapsApiKey = $block->getReferrerApiKey();
 
                 this.isLoading = true;
                 this.searchPerformed = true;
-                this.searchedLocation = '<?= $escaper->escapeJs(__('your current location')) ?>';
+                const currentLocationLabel = '<?= $escaper->escapeJs(__('your current location')) ?>';
+                this.searchedLocation = currentLocationLabel;
                 this.loadingMessage = '<?= $escaper->escapeJs(__('Getting your location...')) ?>';
+                this.cityName = currentLocationLabel;
 
                 try {
                     const position = await new Promise((resolve, reject) => {
@@ -660,9 +1079,16 @@ $mapsApiKey = $block->getReferrerApiKey();
                     });
 
                     console.log('Current location found:', position.coords.latitude, position.coords.longitude);
-                    this.loadingMessage = '<?= $escaper->escapeJs(__('Searching for available stores...')) ?>';
-
-                    await this.searchAvailableStores(position.coords.latitude, position.coords.longitude);
+                    await this.refreshStoresForCoordinates(
+                        position.coords.latitude,
+                        position.coords.longitude,
+                        currentLocationLabel,
+                        {
+                            maintainLoading: true,
+                            keepInput: true,
+                            force: true
+                        }
+                    );
                 } catch (error) {
                     console.error('Geolocation error:', error);
                     alert('<?= $escaper->escapeJs(__('Unable to get your location. Please select a city from the list above.')) ?>');

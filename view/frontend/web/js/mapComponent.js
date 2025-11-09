@@ -75,10 +75,6 @@ function mapComponent(_hyvaData) {
                 country: "",
                 district: "",
                 hasStoredSelection: Boolean(hyvaData.selected_source_code),
-                nearbyStores: [],
-                storeMarkers: [],
-                activeInfoWindow: null,
-                hasAdjustedToStores: false,
 
                 _apiKey: hyvaData.apiKey || null, // Crucial for map
                 _isLoggedIn: isLoggedIn,
@@ -128,7 +124,6 @@ function mapComponent(_hyvaData) {
                                 this.autoSelectDefaultAddress();
                         }
 
-                        this.refreshNearbyStoreMarkers({ forceFit: true });
                 },
 
 		// --- Data Fetching & Updating (primarily from newer, refined versions) ---
@@ -204,8 +199,6 @@ function mapComponent(_hyvaData) {
                                                 lat: this.latitude,
                                                 lng: this.longitude,
                                         };
-                                        this.hasAdjustedToStores = false;
-                                        this.refreshNearbyStoreMarkers({ forceFit: true });
                                 }
 				if (
 					!this.selectedSourceCode &&
@@ -580,7 +573,6 @@ function mapComponent(_hyvaData) {
 
                                 this.createMarker(center); // createMarker from newer version
                                 this.initAutocomplete(); // initAutocomplete from newer version
-                                this.refreshNearbyStoreMarkers({ forceFit: true });
 
                                 // Geocode only if address isn't set and coords are valid (from newer version)
                                 // Check this.currentAddress against the value derived from lat/lng
@@ -875,145 +867,6 @@ function mapComponent(_hyvaData) {
                         });
                         return nearestBranch;
                 },
-                getStoresWithinRange(lat, lng, sourcesData) {
-                        if (!sourcesData || sourcesData.length === 0) return [];
-
-                        const nearby = [];
-
-                        sourcesData.forEach((source) => {
-                                const sourceLat = parseFloat(source.latitude);
-                                const sourceLng = parseFloat(source.longitude);
-
-                                if (Number.isNaN(sourceLat) || Number.isNaN(sourceLng)) {
-                                        return;
-                                }
-
-                                const distance = this.calculateDistance(lat, lng, sourceLat, sourceLng);
-                                const maxRange = parseFloat(source.delivery_range_km);
-                                const effectiveRange = Number.isFinite(maxRange) && maxRange > 0 ? maxRange : 150;
-
-                                if (distance <= effectiveRange) {
-                                        nearby.push({
-                                                source,
-                                                distance,
-                                                distanceText: this.formatDistance(distance),
-                                        });
-                                }
-                        });
-
-                        nearby.sort((a, b) => a.distance - b.distance);
-
-                        return nearby.slice(0, 12);
-                },
-                refreshNearbyStoreMarkers(options = {}) {
-                        const forceFit = Boolean(options.forceFit);
-                        const skipFit = Boolean(options.skipFit);
-                        const sourcesData = Array.isArray(this._sourcesData) ? this._sourcesData : [];
-                        const nearby = this.getStoresWithinRange(this.latitude, this.longitude, sourcesData);
-
-                        this.nearbyStores = nearby;
-
-                        if (!this.map || !this.googleMapsApiLoaded || typeof google === "undefined" || !google.maps) {
-                                return;
-                        }
-
-                        if (forceFit) {
-                                this.hasAdjustedToStores = false;
-                        }
-
-                        this.clearStoreMarkers();
-
-                        if (!nearby.length) {
-                                return;
-                        }
-
-                        const bounds = new google.maps.LatLngBounds();
-                        const currentLocation = new google.maps.LatLng(this.latitude, this.longitude);
-                        bounds.extend(currentLocation);
-
-                        nearby.forEach((entry) => {
-                                const { source, distance } = entry;
-                                const lat = parseFloat(source.latitude);
-                                const lng = parseFloat(source.longitude);
-
-                                if (Number.isNaN(lat) || Number.isNaN(lng)) {
-                                        return;
-                                }
-
-                                const position = { lat, lng };
-                                const marker = new google.maps.Marker({
-                                        position,
-                                        map: this.map,
-                                        title: source.source_name || "Store",
-                                });
-                                const infoWindow = new google.maps.InfoWindow({
-                                        content: this.buildStoreInfoWindow(source, distance),
-                                });
-
-                                marker.addListener("click", () => {
-                                        if (this.activeInfoWindow) {
-                                                this.activeInfoWindow.close();
-                                        }
-                                        infoWindow.open(this.map, marker);
-                                        this.activeInfoWindow = infoWindow;
-                                });
-
-                                this.storeMarkers.push({ marker, infoWindow });
-                                bounds.extend(marker.getPosition());
-                        });
-
-                        if (this.storeMarkers.length && !this.hasAdjustedToStores && !skipFit) {
-                                this.map.fitBounds(bounds);
-                                this.hasAdjustedToStores = true;
-                        }
-                },
-                clearStoreMarkers() {
-                        if (Array.isArray(this.storeMarkers)) {
-                                this.storeMarkers.forEach((entry) => {
-                                        if (entry.marker) {
-                                                entry.marker.setMap(null);
-                                        }
-                                        if (entry.infoWindow) {
-                                                entry.infoWindow.close();
-                                        }
-                                });
-                        }
-                        this.storeMarkers = [];
-                        if (this.activeInfoWindow) {
-                                this.activeInfoWindow.close();
-                                this.activeInfoWindow = null;
-                        }
-                },
-                buildStoreInfoWindow(source, distance) {
-                        const name = this.escapeHtml(source.source_name || "Store");
-                        const phone = source.phone ? `<div class="store-info-window__phone">${this.escapeHtml(source.phone)}</div>` : "";
-                        const distanceLabel = this.escapeHtml(this.formatDistance(distance));
-
-                        return `<div class="store-info-window"><strong>${name}</strong><div class="store-info-window__distance">${distanceLabel}</div>${phone}</div>`;
-                },
-                formatDistance(distance) {
-                        if (!Number.isFinite(distance)) {
-                                return "";
-                        }
-
-                        if (distance < 1) {
-                                return `${Math.round(distance * 1000)} m`;
-                        }
-
-                        const precision = distance < 10 ? 1 : 0;
-                        return `${distance.toFixed(precision)} km`;
-                },
-                escapeHtml(value) {
-                        const stringValue = (value || "").toString();
-                        const map = {
-                                "&": "&amp;",
-                                "<": "&lt;",
-                                ">": "&gt;",
-                                '"': "&quot;",
-                                "'": "&#39;",
-                        };
-                        return stringValue.replace(/[&<>"']/g, (char) => map[char] || char);
-                },
                 calculateDistance(lat1, lng1, lat2, lng2) {
                         const R = 6371;
                         const φ1 = (lat1 * Math.PI) / 180,
@@ -1034,15 +887,6 @@ function mapComponent(_hyvaData) {
                         this.longitude = lng;
                         this.lastValidCoordinates = { lat, lng };
                         this.isAddressValid = true;
-
-                        if (options.resetFit) {
-                                this.hasAdjustedToStores = false;
-                        }
-
-                        this.refreshNearbyStoreMarkers({
-                                forceFit: Boolean(options.resetFit),
-                                skipFit: Boolean(options.skipFit),
-                        });
                 }, // From newer
                 parseAddressComponents(components) {
                         if (!components) return;
