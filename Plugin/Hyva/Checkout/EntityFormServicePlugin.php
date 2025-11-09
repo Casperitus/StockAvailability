@@ -7,6 +7,8 @@ use Madar\StockAvailability\Model\LocationManager;
 
 class EntityFormServicePlugin
 {
+    public const SESSION_ADDRESS_ID = 'madar-session-shipping-address';
+
     private LocationManager $locationManager;
 
     public function __construct(LocationManager $locationManager)
@@ -44,12 +46,20 @@ class EntityFormServicePlugin
             $result['entity']['custom_attributes'] = [];
         }
 
-        if (isset($shippingPrefill['latitude']) && $shippingPrefill['latitude'] !== null) {
-            $result['entity']['custom_attributes']['latitude'] = $shippingPrefill['latitude'];
+        foreach (['latitude', 'longitude'] as $coordinate) {
+            if (isset($shippingPrefill[$coordinate]) && $shippingPrefill[$coordinate] !== null) {
+                $result['entity']['custom_attributes'][$coordinate] = $shippingPrefill[$coordinate];
+            }
         }
-        if (isset($shippingPrefill['longitude']) && $shippingPrefill['longitude'] !== null) {
-            $result['entity']['custom_attributes']['longitude'] = $shippingPrefill['longitude'];
-        }
+
+        $addressesKey = $this->resolveAddressesKey($result);
+        $result[$addressesKey] = $this->injectSessionAddress(
+            $result[$addressesKey] ?? [],
+            $shippingPrefill,
+            $result['entity']['custom_attributes']
+        );
+
+        $result['selectedAddressId'] = self::SESSION_ADDRESS_ID;
 
         return $result;
     }
@@ -71,5 +81,49 @@ class EntityFormServicePlugin
             },
             ARRAY_FILTER_USE_BOTH
         );
+    }
+
+    private function resolveAddressesKey(array $result): string
+    {
+        foreach (['addresses', 'addressList', 'items'] as $key) {
+            if (isset($result[$key]) && is_array($result[$key])) {
+                return $key;
+            }
+        }
+
+        return 'addresses';
+    }
+
+    private function injectSessionAddress(array $addresses, array $shippingPrefill, array $customAttributes): array
+    {
+        $addressItem = $this->filterEmptyValues($shippingPrefill);
+        $addressItem['id'] = self::SESSION_ADDRESS_ID;
+        $addressItem['entity_id'] = self::SESSION_ADDRESS_ID;
+        $addressItem['customer_address_id'] = null;
+
+        $addressItem['custom_attributes'] = [];
+        foreach (['latitude', 'longitude'] as $coordinate) {
+            if (isset($customAttributes[$coordinate])) {
+                $addressItem['custom_attributes'][$coordinate] = $customAttributes[$coordinate];
+            }
+        }
+
+        $filtered = [];
+        foreach ($addresses as $existingAddress) {
+            if (!is_array($existingAddress)) {
+                continue;
+            }
+
+            $existingId = $existingAddress['id'] ?? $existingAddress['entity_id'] ?? null;
+            if ($existingId === self::SESSION_ADDRESS_ID) {
+                continue;
+            }
+
+            $filtered[] = $existingAddress;
+        }
+
+        $filtered[] = $addressItem;
+
+        return $filtered;
     }
 }
