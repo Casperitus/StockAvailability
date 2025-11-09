@@ -39,6 +39,8 @@ class LocationManager
 
     private ?string $defaultCountryId = null;
 
+    private ?array $allowedCountryIds = null;
+
     /**
      * Cache resolved regions to reduce duplicate DB calls during a single request.
      *
@@ -247,24 +249,54 @@ class LocationManager
         $regionId = $addressData['region_id'] ?? ($regionData['region_id'] ?? null);
         $regionCode = $addressData['region_code'] ?? ($regionData['region_code'] ?? null);
 
-        $addressData['country_id'] = $this->resolveCountryId($addressData['country_id'] ?? null);
+        $originalAddressData = $addressData;
+        $resolvedCountryId = $this->resolveCountryId($addressData['country_id'] ?? null);
+
+        if ($resolvedCountryId === '') {
+            $this->logger->debug(
+                'Checkout prefill could not resolve a valid country; leaving country_id unset',
+                [
+                    'payload' => $originalAddressData,
+                    'allowed_countries' => $this->getAllowedCountryIds(),
+                    'resolved_country_id' => null,
+                ]
+            );
+            unset($addressData['country_id']);
+        } else {
+            if ($this->normalizeCountryCode($addressData['country_id'] ?? null) !== $resolvedCountryId) {
+                $this->logger->debug(
+                    'Checkout prefill adjusted country to allowed fallback',
+                    [
+                        'payload' => $originalAddressData,
+                        'allowed_countries' => $this->getAllowedCountryIds(),
+                        'resolved_country_id' => $resolvedCountryId,
+                    ]
+                );
+            }
+            $addressData['country_id'] = $resolvedCountryId;
+        }
+
+        $shippingAddress = [
+            'firstname' => $addressData['firstname'] ?? '',
+            'lastname' => $addressData['lastname'] ?? '',
+            'telephone' => $addressData['telephone'] ?? '',
+            'street' => $addressData['street'] ?? [],
+            'city' => $addressData['city'] ?? '',
+            'postcode' => $addressData['postcode'] ?? '',
+            'region' => $regionData,
+            'region_id' => $regionId,
+            'region_code' => $regionCode,
+            'district' => $addressData['district'] ?? null,
+            'latitude' => $addressData['latitude'] ?? $this->session->getData('customer_latitude'),
+            'longitude' => $addressData['longitude'] ?? $this->session->getData('customer_longitude'),
+        ];
+
+        if (isset($addressData['country_id'])) {
+            $shippingAddress['country_id'] = $addressData['country_id'];
+        }
 
         return [
-            'shipping_address' => [
-                'firstname' => $addressData['firstname'] ?? '',
-                'lastname' => $addressData['lastname'] ?? '',
-                'telephone' => $addressData['telephone'] ?? '',
-                'street' => $addressData['street'] ?? [],
-                'city' => $addressData['city'] ?? '',
-                'postcode' => $addressData['postcode'] ?? '',
-                'country_id' => $addressData['country_id'],
-                'region' => $regionData,
-                'region_id' => $regionId,
-                'region_code' => $regionCode,
-                'district' => $addressData['district'] ?? null,
-                'latitude' => $addressData['latitude'] ?? $this->session->getData('customer_latitude'),
-                'longitude' => $addressData['longitude'] ?? $this->session->getData('customer_longitude'),
-            ],
+            'shipping_address' => $shippingAddress,
             'branch' => $this->getBranchData(),
         ];
     }
@@ -385,23 +417,98 @@ class LocationManager
 
     private function resolveCountryId(?string $countryId): string
     {
-        $countryId = strtoupper(trim((string)$countryId));
+        $allowedCountries = $this->getAllowedCountryIds();
+        $normalizedCountryId = $this->normalizeCountryCode($countryId);
 
-        if ($countryId === '') {
-            $countryId = $this->getDefaultCountryId();
+        if ($normalizedCountryId !== '' && ($allowedCountries === [] || in_array($normalizedCountryId, $allowedCountries, true))) {
+            return $normalizedCountryId;
         }
 
-        return $countryId;
+        if ($normalizedCountryId !== '' && $allowedCountries !== [] && !in_array($normalizedCountryId, $allowedCountries, true)) {
+            $fallback = $this->getDefaultCountryId();
+            if ($fallback !== '' && $fallback !== $normalizedCountryId) {
+                $this->logger->debug('Requested country is not allowed; using fallback', [
+                    'requested_country_id' => $normalizedCountryId,
+                    'fallback_country_id' => $fallback,
+                    'allowed_countries' => $allowedCountries,
+                ]);
+
+                return $fallback;
+            }
+
+            $this->logger->debug('Requested country is not allowed and no fallback available', [
+                'requested_country_id' => $normalizedCountryId,
+                'allowed_countries' => $allowedCountries,
+            ]);
+
+            return '';
+        }
+
+        $fallback = $this->getDefaultCountryId();
+        if ($fallback !== '') {
+            return $fallback;
+        }
+
+        $this->logger->debug('No country provided and no fallback available', [
+            'allowed_countries' => $allowedCountries,
+        ]);
+
+        return '';
     }
 
     private function getDefaultCountryId(): string
     {
         if ($this->defaultCountryId === null) {
-            $default = strtoupper((string)$this->scopeConfig->getValue('general/country/default', ScopeInterface::SCOPE_STORE));
-            $this->defaultCountryId = $default !== '' ? $default : 'SA';
+            $configuredDefault = $this->normalizeCountryCode(
+                (string)$this->scopeConfig->getValue('general/country/default', ScopeInterface::SCOPE_STORE)
+            );
+            $allowedCountries = $this->getAllowedCountryIds();
+
+            if ($configuredDefault !== '' && ($allowedCountries === [] || in_array($configuredDefault, $allowedCountries, true))) {
+                $this->defaultCountryId = $configuredDefault;
+            } elseif ($allowedCountries !== []) {
+                $fallback = $allowedCountries[0];
+                $this->logger->debug('Configured default country is not allowed; using first allowed country', [
+                    'configured_default' => $configuredDefault,
+                    'fallback_country_id' => $fallback,
+                    'allowed_countries' => $allowedCountries,
+                ]);
+                $this->defaultCountryId = $fallback;
+            } else {
+                if ($configuredDefault !== '') {
+                    $this->logger->debug('Configured default country is not allowed and no allowed list available', [
+                        'configured_default' => $configuredDefault,
+                    ]);
+                } else {
+                    $this->logger->debug('No configured default country and no allowed list available');
+                }
+                $this->defaultCountryId = '';
+            }
         }
 
         return $this->defaultCountryId;
+    }
+
+    private function getAllowedCountryIds(): array
+    {
+        if ($this->allowedCountryIds === null) {
+            $allowed = (string)$this->scopeConfig->getValue('general/country/allow', ScopeInterface::SCOPE_STORE);
+            $codes = array_map(function ($code) {
+                return $this->normalizeCountryCode($code);
+            }, explode(',', $allowed));
+            $codes = array_values(array_filter($codes, static function ($code) {
+                return $code !== '';
+            }));
+
+            $this->allowedCountryIds = $codes;
+        }
+
+        return $this->allowedCountryIds;
+    }
+
+    private function normalizeCountryCode(?string $countryId): string
+    {
+        return strtoupper(trim((string)$countryId));
     }
 
     private function resolveRegionByName(string $regionName, string $countryId): array
