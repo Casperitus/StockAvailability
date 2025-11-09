@@ -10,6 +10,7 @@ use Magento\Customer\Api\AddressRepositoryInterface;
 use Magento\Customer\Api\CustomerRepositoryInterface;
 use Magento\Customer\Api\Data\AddressInterface;
 use Magento\Customer\Model\Session as CustomerSession;
+use Magento\Directory\Model\ResourceModel\Region\CollectionFactory as RegionCollectionFactory;
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\App\ObjectManager;
 use Magento\Framework\Data\Form\FormKey;
@@ -30,6 +31,7 @@ class GoogleMaps extends Template
     protected $formKey;
     protected LocationSession $locationSession;
     protected LocationLogger $locationLogger;
+    protected RegionCollectionFactory $regionCollectionFactory;
 
     public function __construct(
         Template\Context $context,
@@ -42,6 +44,7 @@ class GoogleMaps extends Template
         AddressRepositoryInterface $addressRepository,
         CustomerRepositoryInterface $customerRepository,
         LocationLogger $locationLogger,
+        RegionCollectionFactory $regionCollectionFactory,
         FormKey $formKey = null,
         array $data = []
     ) {
@@ -54,6 +57,7 @@ class GoogleMaps extends Template
         $this->addressRepository = $addressRepository;
         $this->customerRepository = $customerRepository;
         $this->locationLogger = $locationLogger;
+        $this->regionCollectionFactory = $regionCollectionFactory;
         $this->formKey = $formKey ?: ObjectManager::getInstance()->get(FormKey::class);
         parent::__construct($context, $data);
     }
@@ -194,8 +198,35 @@ class GoogleMaps extends Template
     }
 
     /**
+     * Retrieve Magento regions for a given country.
+     *
+     * @param string $countryCode
+     * @return array
+     */
+    public function getCountryRegions(string $countryCode = 'SA'): array
+    {
+        $collection = $this->regionCollectionFactory->create();
+        $collection->addCountryFilter($countryCode);
+
+        $regions = [];
+
+        foreach ($collection as $region) {
+            $regions[] = [
+                'code' => $region->getCode(),
+                'name' => $region->getName(),
+            ];
+        }
+
+        usort($regions, static function (array $left, array $right): int {
+            return strcmp($left['name'], $right['name']);
+        });
+
+        return $regions;
+    }
+
+    /**
      * Retrieve the selected_source_code from our session storage
-     * 
+     *
      * @return string|null
      */
     public function getSelectedSourceCode()
