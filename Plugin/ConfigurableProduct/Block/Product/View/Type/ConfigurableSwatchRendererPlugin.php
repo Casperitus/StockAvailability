@@ -59,6 +59,8 @@ class ConfigurableSwatchRendererPlugin
         $customerData = $this->customerSession->getData();
         $sourceCode = $customerData['selected_source_code'] ?? null;
 
+        $requestableProductIds = [];
+
         foreach ($associatedProducts as $associatedProduct) {
             $productId = $associatedProduct->getId();
             $sku = $associatedProduct->getSku();
@@ -79,11 +81,73 @@ class ConfigurableSwatchRendererPlugin
 
             if (!$isDeliverable) {
                 $associatedProduct->setIsSalable(false);
+                $requestableProductIds[] = (int) $productId;
             }
+        }
+
+        if ($requestableProductIds) {
+            $config = $this->disableRequestableConfigurations($config, $requestableProductIds);
         }
 
         // Log the final JSON configuration that gets sent to the frontend
         $finalJsonConfig = $this->jsonSerializer->serialize($config);
         return $finalJsonConfig;
+    }
+
+    /**
+     * Remove requestable product IDs from the configurable index so their swatches are disabled.
+     *
+     * @param array $config
+     * @param int[] $requestableProductIds
+     * @return array
+     */
+    private function disableRequestableConfigurations(array $config, array $requestableProductIds): array
+    {
+        if (empty($config['attributes']) || empty($config['index']) || !is_array($config['attributes'])) {
+            return $config;
+        }
+
+        $normalizedIds = array_unique(array_map('intval', $requestableProductIds));
+
+        foreach ($normalizedIds as $productId) {
+            if (!isset($config['index'][$productId]) || !is_array($config['index'][$productId])) {
+                continue;
+            }
+
+            foreach ($config['index'][$productId] as $attributeId => $optionId) {
+                if (!isset($config['attributes'][$attributeId]['options'])) {
+                    continue;
+                }
+
+                foreach ($config['attributes'][$attributeId]['options'] as &$option) {
+                    if (!isset($option['id']) || (int) $option['id'] !== (int) $optionId) {
+                        continue;
+                    }
+
+                    $products = $option['products'] ?? [];
+                    if (!is_array($products)) {
+                        $products = [];
+                    }
+
+                    $option['products'] = array_values(array_filter(
+                        $products,
+                        static fn($candidateId) => (int) $candidateId !== $productId
+                    ));
+
+                    if (empty($option['products'])) {
+                        $option['disabled'] = true;
+                    }
+                }
+                unset($option);
+            }
+
+            $config['index'][$productId] = [];
+
+            if (isset($config['salable']) && is_array($config['salable'])) {
+                $config['salable'][$productId] = false;
+            }
+        }
+
+        return $config;
     }
 }

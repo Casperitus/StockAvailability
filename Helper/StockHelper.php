@@ -829,6 +829,8 @@ class StockHelper extends AbstractHelper
             'child_skus' => $childSkus,
         ]);
 
+        $this->preloadChildDeliverabilityStatuses($childSkus, $sourceCode);
+
         foreach ($childSkus as $childSku) {
             if ($childSku === $sku) {
                 $this->logger->warning('[StockHelper] Skipping self-referential child SKU during composite evaluation.', [
@@ -861,6 +863,66 @@ class StockHelper extends AbstractHelper
         $this->deliverabilityCache[$sku][$sourceCode] = $isDeliverable;
 
         return $isDeliverable;
+    }
+
+    /**
+     * Preload deliverability statuses for a batch of child SKUs so repeated lookups are avoided.
+     *
+     * @param string[] $childSkus
+     */
+    private function preloadChildDeliverabilityStatuses(array $childSkus, string $sourceCode): void
+    {
+        if (empty($childSkus)) {
+            return;
+        }
+
+        $skusToLoad = [];
+        foreach (array_unique($childSkus) as $childSku) {
+            if ($childSku === '' || isset($this->deliverabilityCache[$childSku][$sourceCode])) {
+                continue;
+            }
+
+            $skusToLoad[] = $childSku;
+        }
+
+        if (empty($skusToLoad)) {
+            return;
+        }
+
+        try {
+            $connection = $this->resourceConnection->getConnection();
+            $tableName = $this->resourceConnection->getTableName('madar_product_deliverability');
+
+            $select = $connection->select()
+                ->from($tableName, ['product_sku', 'deliverable'])
+                ->where('source_code = ?', $sourceCode)
+                ->where('product_sku IN (?)', $skusToLoad);
+
+            $rows = $connection->fetchPairs($select);
+
+            foreach ($skusToLoad as $sku) {
+                if (array_key_exists($sku, $rows)) {
+                    $isDeliverable = (bool) $rows[$sku];
+                    $this->deliverabilityCache[$sku][$sourceCode] = $isDeliverable;
+                    $this->logger->debug('[StockHelper] Prefetched deliverability flag from database.', [
+                        'sku' => $sku,
+                        'source_code' => $sourceCode,
+                        'database_value' => $isDeliverable,
+                    ]);
+                } else {
+                    $this->deliverabilityCache[$sku][$sourceCode] = false;
+                    $this->logger->debug('[StockHelper] No deliverability record found during preload; defaulting to requestable.', [
+                        'sku' => $sku,
+                        'source_code' => $sourceCode,
+                    ]);
+                }
+            }
+        } catch (\Exception $exception) {
+            $this->logger->error('[StockHelper] Failed to preload child deliverability statuses: ' . $exception->getMessage(), [
+                'source_code' => $sourceCode,
+                'child_skus' => $skusToLoad,
+            ]);
+        }
     }
 
 
