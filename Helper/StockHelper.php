@@ -718,6 +718,11 @@ class StockHelper extends AbstractHelper
     {
         try {
             if (isset($this->deliverabilityCache[$sku][$sourceCode])) {
+                $this->logger->debug('[StockHelper] Using cached deliverability result.', [
+                    'sku' => $sku,
+                    'source_code' => $sourceCode,
+                    'is_deliverable' => $this->deliverabilityCache[$sku][$sourceCode],
+                ]);
                 return $this->deliverabilityCache[$sku][$sourceCode];
             }
 
@@ -725,6 +730,11 @@ class StockHelper extends AbstractHelper
             if ($sourceCode === 'NATIONWIDE_SHIPPING') {
                 $product = $this->productRepository->get($sku);
                 $hasGlobalShipping = $this->hasGlobalShipping($product);
+                $this->logger->debug('[StockHelper] Nationwide shipping check.', [
+                    'sku' => $sku,
+                    'source_code' => $sourceCode,
+                    'has_global_shipping' => $hasGlobalShipping,
+                ]);
                 $this->deliverabilityCache[$sku][$sourceCode] = $hasGlobalShipping;
                 return $hasGlobalShipping;
             }
@@ -734,6 +744,10 @@ class StockHelper extends AbstractHelper
             $hasGlobalShipping = $this->hasGlobalShipping($product);
 
             if ($hasGlobalShipping) {
+                $this->logger->debug('[StockHelper] Product has global shipping; marking as deliverable for source.', [
+                    'sku' => $sku,
+                    'source_code' => $sourceCode,
+                ]);
                 $this->deliverabilityCache[$sku][$sourceCode] = true;
                 return true;
             }
@@ -741,6 +755,12 @@ class StockHelper extends AbstractHelper
             // Step 3: For actual sources and non-global shipping products, check precomputed deliverability status
             $isDeliverable = $this->getDeliverabilityStatus($sku, $sourceCode);
             $this->deliverabilityCache[$sku][$sourceCode] = $isDeliverable;
+
+            $this->logger->debug('[StockHelper] Determined deliverability from precomputed table.', [
+                'sku' => $sku,
+                'source_code' => $sourceCode,
+                'is_deliverable' => $isDeliverable,
+            ]);
 
             return $isDeliverable; // No need for the if/else here
 
@@ -844,12 +864,25 @@ class StockHelper extends AbstractHelper
             $result = $connection->fetchOne($select);
 
             if ($result !== false) {
+                $this->logger->debug('[StockHelper] Loaded deliverability flag from database.', [
+                    'sku' => $sku,
+                    'source_code' => $sourceCode,
+                    'database_value' => (bool) $result,
+                ]);
                 return (bool)$result;
             }
 
             // If there's no entry in the table, default to not deliverable
+            $this->logger->debug('[StockHelper] No deliverability record found; defaulting to requestable.', [
+                'sku' => $sku,
+                'source_code' => $sourceCode,
+            ]);
             return false;
         } catch (\Exception $e) {
+            $this->logger->error('[StockHelper] Failed to fetch deliverability status: ' . $e->getMessage(), [
+                'sku' => $sku,
+                'source_code' => $sourceCode,
+            ]);
             return false;
         }
     }

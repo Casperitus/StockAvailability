@@ -40,11 +40,17 @@ class ProductCollectionPlugin
         try {
             $items = $result->getItems();
             if (!$items) {
+                $this->logger->debug('Product collection loaded without items; skipping deliverability evaluation.');
                 return $result;
             }
 
             $sourceCode = $this->customerSession->getData('selected_source_code');
             $sourceCode = $sourceCode ? (string) $sourceCode : null;
+
+            $this->logger->debug('Evaluating deliverability for product collection.', [
+                'selected_source_code' => $sourceCode,
+                'item_count' => count($items),
+            ]);
 
             foreach ($items as $product) {
                 $sku = (string) $product->getSku();
@@ -52,6 +58,10 @@ class ProductCollectionPlugin
 
                 if ($sourceCode) {
                     $isDeliverable = $this->stockHelper->isProductDeliverable($sku, $sourceCode);
+                } else {
+                    $this->logger->debug('No source selected; defaulting collection item to deliverable.', [
+                        'sku' => $sku,
+                    ]);
                 }
 
                 $this->deliverabilityAttribute->apply($product, $isDeliverable);
@@ -59,6 +69,11 @@ class ProductCollectionPlugin
                 if (!$isDeliverable) {
                     $product->setIsSalable(false);
                     $this->logger->debug(sprintf('Product %s marked as requestable in collection.', $sku));
+                } else {
+                    $this->logger->debug('Product marked as deliverable in collection.', [
+                        'sku' => $sku,
+                        'source_code' => $sourceCode,
+                    ]);
                 }
             }
 

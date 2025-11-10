@@ -36,18 +36,23 @@ $hasAssociatedProducts = count($associatedProducts) > 0;
         <?php
         $deliverableValue = $item->getData('is_deliverable');
         $deliverableFlag = $item->getData('is_deliverable_flag');
+        $deliverableLabelData = $item->getData('is_deliverable_label');
 
-        if ($deliverableFlag !== null) {
-            $isItemDeliverable = (bool) $deliverableFlag;
-        } elseif ($deliverableValue === null) {
-            $isItemDeliverable = null;
-        } elseif (is_bool($deliverableValue)) {
-            $isItemDeliverable = $deliverableValue;
-        } elseif (is_string($deliverableValue)) {
-            $isItemDeliverable = strcasecmp($deliverableValue, 'Deliverable') === 0;
-        } else {
-            $isItemDeliverable = ((int) $deliverableValue) === 1;
+        if ($deliverableFlag === null && is_string($deliverableLabelData)) {
+            $deliverableFlag = strcasecmp($deliverableLabelData, 'Deliverable') === 0;
         }
+
+        if ($deliverableFlag === null && $deliverableValue !== null) {
+            if (is_bool($deliverableValue)) {
+                $deliverableFlag = $deliverableValue;
+            } elseif (is_string($deliverableValue)) {
+                $deliverableFlag = strcasecmp($deliverableValue, 'Deliverable') === 0;
+            } else {
+                $deliverableFlag = ((int) $deliverableValue) === 1;
+            }
+        }
+
+        $isItemDeliverable = $deliverableFlag === null ? null : (bool) $deliverableFlag;
         ?>
         <div class="flex flex-wrap border-t border-gray-300 py-2 w-full items-center justify-between gap-2">
             <label class="text-gray-700" for="super_group[<?= $escaper->escapeHtmlAttr($item->getId()) ?>]">

@@ -41,33 +41,52 @@ class ProductPlugin
     {
         $sku = (string) $subject->getSku();
 
+        $sourceCode = $this->customerSession->getData('selected_source_code');
+        $normalizedSource = $sourceCode ? (string) $sourceCode : null;
+
+        $this->logger->debug('Evaluating deliverability during isSaleable.', [
+            'sku' => $sku,
+            'initial_result' => $result,
+            'selected_source_code' => $normalizedSource,
+        ]);
+
         if (!$result) {
             $this->deliverabilityAttribute->apply($subject, false);
+            $this->logger->debug('Product already non-salable, forcing requestable deliverability.', ['sku' => $sku]);
             return false;
         }
 
-        $sourceCode = $this->customerSession->getData('selected_source_code');
-        $cacheKey = $this->getCacheKey($sku, $sourceCode ? (string) $sourceCode : null);
+        $cacheKey = $this->getCacheKey($sku, $normalizedSource);
 
         if (array_key_exists($cacheKey, $this->validatedSkus)) {
             $isDeliverable = $this->validatedSkus[$cacheKey];
             $this->deliverabilityAttribute->apply($subject, $isDeliverable);
+            $this->logger->debug('Using cached deliverability decision.', [
+                'sku' => $sku,
+                'source_code' => $normalizedSource,
+                'is_deliverable' => $isDeliverable,
+            ]);
             return $result && $isDeliverable;
         }
 
-        if (!$sourceCode) {
+        if (!$normalizedSource) {
             $this->logger->debug(sprintf('No source selected for SKU %s, defaulting to deliverable.', $sku));
             $this->validatedSkus[$cacheKey] = true;
             $this->deliverabilityAttribute->apply($subject, true);
             return $result;
         }
 
-        $isDeliverable = $this->stockHelper->isProductDeliverable($sku, (string) $sourceCode);
+        $isDeliverable = $this->stockHelper->isProductDeliverable($sku, $normalizedSource);
         $this->validatedSkus[$cacheKey] = $isDeliverable;
         $this->deliverabilityAttribute->apply($subject, $isDeliverable);
 
         if (!$isDeliverable) {
-            $this->logger->info(sprintf('SKU %s marked as requestable for source %s.', $sku, $sourceCode));
+            $this->logger->info(sprintf('SKU %s marked as requestable for source %s.', $sku, $normalizedSource ?? 'N/A'));
+        } else {
+            $this->logger->debug('SKU marked as deliverable after helper evaluation.', [
+                'sku' => $sku,
+                'source_code' => $normalizedSource,
+            ]);
         }
 
         return $result && $isDeliverable;

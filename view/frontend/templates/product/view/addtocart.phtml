@@ -29,18 +29,23 @@ if (!$product || !$product->getId()) {
 $isCartConfigure = (bool) $block->getData('is_cart_configure');
 $deliverableValue = $product->getData('is_deliverable');
 $deliverableFlag = $product->getData('is_deliverable_flag');
+$deliverableLabelData = $product->getData('is_deliverable_label');
 
-if ($deliverableFlag !== null) {
-    $isDeliverable = (bool) $deliverableFlag;
-} elseif ($deliverableValue === null) {
-    $isDeliverable = null;
-} elseif (is_bool($deliverableValue)) {
-    $isDeliverable = $deliverableValue;
-} elseif (is_string($deliverableValue)) {
-    $isDeliverable = strcasecmp($deliverableValue, 'Deliverable') === 0;
-} else {
-    $isDeliverable = ((int) $deliverableValue) === 1;
+if ($deliverableFlag === null && is_string($deliverableLabelData)) {
+    $deliverableFlag = strcasecmp($deliverableLabelData, 'Deliverable') === 0;
 }
+
+if ($deliverableFlag === null && $deliverableValue !== null) {
+    if (is_bool($deliverableValue)) {
+        $deliverableFlag = $deliverableValue;
+    } elseif (is_string($deliverableValue)) {
+        $deliverableFlag = strcasecmp($deliverableValue, 'Deliverable') === 0;
+    } else {
+        $deliverableFlag = ((int) $deliverableValue) === 1;
+    }
+}
+
+$isDeliverable = $deliverableFlag === null ? null : (bool) $deliverableFlag;
 
 $defaultLabel = $isCartConfigure ? __('Update item') : __('Add to Cart');
 $buttonLabel = $isDeliverable === false ? __('Request Item') : $defaultLabel;

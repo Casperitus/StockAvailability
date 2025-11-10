@@ -49,15 +49,16 @@ $productCollection = $block->getLoadedProductCollection();
                         $product->setData('image_custom_attributes', ['loading' => 'eager', 'fetchpriority' => 'high']);
                     }
 
-                    $deliverableValue = $product->getData('is_deliverable');
-                    $isDeliverable = is_bool($deliverableValue)
-                        ? $deliverableValue
-                        : (is_string($deliverableValue)
-                            ? strcasecmp($deliverableValue, 'Deliverable') === 0
-                            : ((int) $deliverableValue === 1));
-                    $deliverableLabel = $isDeliverable
-                        ? __('Deliverable')
-                        : __('Requestable');
+                    $deliverableFlag = $product->getData('is_deliverable_flag');
+                    if ($deliverableFlag === null) {
+                        $deliverableFlag = (bool)$product->getData('is_deliverable');
+                    }
+
+                    $isDeliverable = (bool)$deliverableFlag;
+                    $deliverableLabelData = $product->getData('is_deliverable_label');
+                    $deliverableLabel = $deliverableLabelData
+                        ? __($deliverableLabelData)
+                        : ($isDeliverable ? __('Deliverable') : __('Requestable'));
                     $badgeClasses = $isDeliverable
                         ? 'bg-green-100 text-green-800'
                         : 'bg-yellow-100 text-yellow-800';
