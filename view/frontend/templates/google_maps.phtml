@@ -109,40 +109,7 @@ if (!$hyvaData || !isset($hyvaData['apiKey']) || empty($hyvaData['apiKey'])) {
                         x-text="showSavedAddresses ? '<?= $escaper->escapeJs(__('Select Delivery Address')) ?>' : '<?= $escaper->escapeJs(__('Set Delivery Location')) ?>'">
                     </h2>
 
-                    <!-- Replace the existing toggle section with this improved version -->
-                    <div x-show="selectedSourceCode" class="mb-4 p-3 bg-gray-50 rounded-md">
-                        <div class="flex items-center justify-between">
-                            <span class="text-sm font-medium text-gray-700">
-                                <?= $escaper->escapeHtml(__('Show only deliverable items')) ?>
-                            </span>
-                            <button
-                                type="button"
-                                @click="$store.deliverability.hideUndeliverable = !$store.deliverability.hideUndeliverable; $store.deliverability.savePreference()"
-                                class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
-                                :class="$store.deliverability.hideUndeliverable ? 'bg-primary' : 'bg-gray-200'"
-                                role="switch"
-                                :aria-checked="$store.deliverability.hideUndeliverable">
-                                <span
-                                    class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform"
-                                    :class="$store.deliverability.hideUndeliverable ? 'translate-x-6' : 'translate-x-1'">
-                                </span>
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Error Display -->
-                    <div x-show="$store.deliverability?.error"
-                        class="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
-                        <div class="flex">
-                            <div class="ml-3">
-                                <h3 class="text-sm font-medium text-red-800">
-                                    <?= $escaper->escapeHtml(__('Error')) ?>
-                                </h3>
-                                <div class="mt-2 text-sm text-red-700" x-text="$store.deliverability?.error">
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                    <!-- Toggle removed: deliverability filtering handled server-side -->
 
                     <!-- Saved Address List or Login Prompt -->
                     <div x-show="showSavedAddresses">

@@ -1,10 +1,5 @@
 <?php
 
-/**
- * Hyvä Themes - https://hyva.io
- * Copyright © Hyvä Themes ...
- */
-
 declare(strict_types=1);
 
 use Magento\Catalog\Block\Product\View\BaseImage;
@@ -17,151 +12,100 @@ use Magento\Framework\Escaper;
  * @var Escaper $escaper
  */
 
-// Preconfigured quantity logic
 $block->setPreconfiguredValue();
 
 $product = $block->getProduct();
 $associatedProducts = $block->getAssociatedProducts();
 $hasAssociatedProducts = count($associatedProducts) > 0;
 ?>
-<script>
-    // We'll collect child SKUs in a global array
-    window.groupedChildSkus = window.groupedChildSkus || [];
-</script>
 
-<script>
-    function initGroupedOptions() {
-        return {
-            isValid: true,
-            validateForm() {
-                const inputs = Array.from(document.querySelectorAll('input[name^=super_group]'));
-                this.isValid = inputs.some(input => {
-                    const value = parseFloat(input.value);
-                    // Ensure the value is a valid number and greater than 0
-                    return !isNaN(value) && value >= 0;
-                });
+<?php if ($hasAssociatedProducts): ?>
+    <h2 class="text-gray-900 text-xl title-font font-medium mb-2">
+        <?= $escaper->escapeHtml(__('Grouped product items')) ?>
+    </h2>
+    <div class="hidden sm:flex py-2 border-t border-gray-300 w-full items-center justify-between gap-2">
+        <div class="text-gray-500 font-semibold text-left">
+            <?= $escaper->escapeHtml(__('Product Name')) ?>
+        </div>
+        <div class="text-gray-500 font-semibold text-left w-40">
+            <?= $escaper->escapeHtml(__('Qty')) ?>
+        </div>
+    </div>
 
-                inputs.forEach(input => {
-                    input.setCustomValidity(
-                        this.isValid ?
-                        "" :
-                        "<?= $escaper->escapeJs(__('Please specify the quantity of product(s).')) ?>"
-                    );
-                });
+    <?php foreach ($associatedProducts as $item): ?>
+        <?php
+        $deliverableValue = $item->getData('is_deliverable');
+        $deliverableFlag = $item->getData('is_deliverable_flag');
+        $deliverableLabelData = $item->getData('is_deliverable_label');
 
-                if (!this.isValid) {
-                    document.querySelector("#product_addtocart_form").reportValidity();
-                    return false;
-                }
-                return true;
+        if ($deliverableFlag === null && is_string($deliverableLabelData)) {
+            $deliverableFlag = strcasecmp($deliverableLabelData, 'Deliverable') === 0;
+        }
+
+        if ($deliverableFlag === null && $deliverableValue !== null) {
+            if (is_bool($deliverableValue)) {
+                $deliverableFlag = $deliverableValue;
+            } elseif (is_string($deliverableValue)) {
+                $deliverableFlag = strcasecmp($deliverableValue, 'Deliverable') === 0;
+            } else {
+                $deliverableFlag = ((int) $deliverableValue) === 1;
             }
         }
-    }
-</script>
 
-<div class="my-12" x-data="initGroupedOptions()">
-    <?php if ($hasAssociatedProducts): ?>
-        <h2 class="text-gray-900 text-xl title-font font-medium mb-2">
-            <?= $escaper->escapeHtml(__('Grouped product items')) ?>
-        </h2>
-        <div class="hidden sm:flex py-2 border-t border-gray-300 w-full items-center justify-between gap-2">
-            <div class="text-gray-500 font-semibold text-left">
-                <?= $escaper->escapeHtml(__('Product Name')) ?>
-            </div>
-            <div class="text-gray-500 font-semibold text-left w-40">
-                <?= $escaper->escapeHtml(__('Qty')) ?>
-            </div>
-        </div>
+        $isItemDeliverable = $deliverableFlag === null ? null : (bool) $deliverableFlag;
+        ?>
+        <div class="flex flex-wrap border-t border-gray-300 py-2 w-full items-center justify-between gap-2">
+            <label class="text-gray-700" for="super_group[<?= $escaper->escapeHtmlAttr($item->getId()) ?>]">
+                <span class="product-item-name font-semibold">
+                    <?= $escaper->escapeHtml($item->getName()) ?>
+                </span>
+                <?php if ($block->getCanShowProductPrice($product) && $block->getCanShowProductPrice($item)): ?>
+                    <?= $block->getProductPrice($item) ?>
+                <?php endif; ?>
+            </label>
 
-        <?php foreach ($associatedProducts as $item): ?>
-            <?php
-            $itemSku       = $escaper->escapeJs($item->getSku() ?: '');
-            $itemIsSaleable = $item->isSaleable() ? 'true' : 'false';
-            ?>
-
-            <!-- Push child SKU to global array -->
-            <script>
-                window.groupedChildSkus.push('<?= $itemSku ?>');
-            </script>
-
-            <div
-                class="flex flex-wrap border-t border-gray-300 py-2 w-full items-center justify-between gap-2"
-                x-data="{
-                    // We'll still track the SKU for in-template reads
-                    sku: '<?= $itemSku ?>',
-                    get isSaleable() { return <?= $itemIsSaleable ?> },
-                    get isDeliverable() {
-                        // read from Alpine store, no direct register call
-                        return Alpine.store('deliverability').map[this.sku] === 'Yes';
-                    }
-                }">
-                <label class="text-gray-700 ltr:text-left rtl:text-right" for="super_group[<?= $escaper->escapeHtmlAttr($item->getId()) ?>]">
-                    <span class="product-item-name font-semibold">
-                        <?= $escaper->escapeHtml($item->getName()) ?>
-                    </span>
-                    <?php if ($block->getCanShowProductPrice($product) && $block->getCanShowProductPrice($item)): ?>
-                        <?= $block->getProductPrice($item) ?>
-                    <?php endif; ?>
-                </label>
-
-                <div class="label text-gray-900 ltr:text-left rtl:text-right ltr:sm:text-right rtl:sm:text-left w-full sm:w-40">
-                    <?php if ($product->isSaleable()): ?>
-                        <template x-if="isSaleable && isDeliverable">
-                            <div class="control qty">
-                                <input
-                                    type="number"
-                                    min="0"
-                                    step="0.1"
-                                    name="super_group[<?= $escaper->escapeHtmlAttr($item->getId()) ?>]"
-                                    id="super_group[<?= $escaper->escapeHtmlAttr($item->getId()) ?>]"
-                                    value="<?= $escaper->escapeHtmlAttr($item->getQty() * 1) ?>"
-                                    title="<?= $escaper->escapeHtmlAttr(__('Qty')) ?>"
-                                    class="qty form-input px-2 py-2 w-40 text-center"
-                                    @input.debounce="validateForm()" />
-                            </div>
-                        </template>
-                        <template x-if="!isSaleable">
-                            <div class="flex items-center gap-2 p-2 rounded-lg bg-red-100">
-                                <span class="w-3 h-3 rounded-full shrink-0 bg-red-500"></span>
-                                <span class="text-sm"><?= $escaper->escapeHtml(__('Out of Stock')) ?></span>
-                            </div>
-                        </template>
-                        <template x-if="isSaleable && !isDeliverable">
-                            <div class="flex items-center gap-2 p-2 rounded-lg bg-red-100">
-                                <span class="w-3 h-3 rounded-full shrink-0 bg-red-500"></span>
-                                <span class="text-sm"><?= $escaper->escapeHtml(__('Undeliverable')) ?></span>
-                            </div>
-                        </template>
-                    <?php else: ?>
-                        <div class="flex items-center gap-2 p-2 rounded-lg bg-red-100">
-                            <span class="w-3 h-3 rounded-full shrink-0 bg-red-500"></span>
-                            <span class="text-sm"><?= $escaper->escapeHtml(__('Cannot be purchased')) ?></span>
-                        </div>
-                    <?php endif; ?>
-                </div>
-
-                <?php if (
-                    $block->getCanShowProductPrice($product)
-                    && $block->getCanShowProductPrice($item)
-                    && trim($block->getProductPriceHtml($item, TierPrice::PRICE_CODE))
-                ): ?>
-                    <div class="flex pt-2 w-full items-center">
-                        <?= $block->getProductPriceHtml($item, TierPrice::PRICE_CODE) ?>
+            <div class="label text-gray-900 w-full sm:w-40">
+                <?php if (!$product->isSaleable()): ?>
+                    <div class="flex items-center gap-2 p-2 rounded-lg bg-red-100">
+                        <span class="w-3 h-3 rounded-full shrink-0 bg-red-500"></span>
+                        <span class="text-sm"><?= $escaper->escapeHtml(__('Cannot be purchased')) ?></span>
+                    </div>
+                <?php elseif (!$item->isSaleable()): ?>
+                    <div class="flex items-center gap-2 p-2 rounded-lg bg-red-100">
+                        <span class="w-3 h-3 rounded-full shrink-0 bg-red-500"></span>
+                        <span class="text-sm"><?= $escaper->escapeHtml(__('Out of Stock')) ?></span>
+                    </div>
+                <?php elseif ($isItemDeliverable === false): ?>
+                    <div class="flex items-center gap-2 p-2 rounded-lg bg-red-100">
+                        <span class="w-3 h-3 rounded-full shrink-0 bg-red-500"></span>
+                        <span class="text-sm"><?= $escaper->escapeHtml(__('Requestable')) ?></span>
+                    </div>
+                <?php else: ?>
+                    <div class="control qty">
+                        <input
+                            type="number"
+                            min="0"
+                            step="0.1"
+                            name="super_group[<?= $escaper->escapeHtmlAttr($item->getId()) ?>]"
+                            id="super_group[<?= $escaper->escapeHtmlAttr($item->getId()) ?>]"
+                            value="<?= $escaper->escapeHtmlAttr($item->getQty() * 1) ?>"
+                            title="<?= $escaper->escapeHtmlAttr(__('Qty')) ?>"
+                            class="qty form-input px-2 py-2 w-40 text-center" />
                     </div>
                 <?php endif; ?>
             </div>
-        <?php endforeach; ?>
 
-        <!-- ONE-TIME registration after loop. Wrap in alpine:init to avoid "Alpine is not defined" -->
-        <script>
-            document.addEventListener('alpine:init', () => {
-                if (window.groupedChildSkus?.length) {
-                    DeliverabilityService.registerSkus(window.groupedChildSkus);
-                }
-            });
-        </script>
-
-    <?php else: ?>
-        <?= $escaper->escapeHtml(__('No options of this product are available.')) ?>
-    <?php endif; ?>
-</div>
+            <?php if (
+                $block->getCanShowProductPrice($product)
+                && $block->getCanShowProductPrice($item)
+                && trim($block->getProductPriceHtml($item, TierPrice::PRICE_CODE))
+            ): ?>
+                <div class="flex pt-2 w-full items-center">
+                    <?= $block->getProductPriceHtml($item, TierPrice::PRICE_CODE) ?>
+                </div>
+            <?php endif; ?>
+        </div>
+    <?php endforeach; ?>
+<?php else: ?>
+    <?= $escaper->escapeHtml(__('No options of this product are available.')) ?>
+<?php endif; ?>

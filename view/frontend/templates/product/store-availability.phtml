@@ -45,10 +45,10 @@ $mapsApiKey = $block->getReferrerApiKey();
                 }
 
                 const script = document.createElement('script');
-                script.src = 'https://maps.googleapis.com/maps/api/js'
-                    + '?key=' + apiKey
-                    + '&libraries=places'
-                    + '&callback=' + callbackName;
+                script.src = 'https://maps.googleapis.com/maps/api/js' +
+                    '?key=' + apiKey +
+                    '&libraries=places' +
+                    '&callback=' + callbackName;
                 script.async = true;
                 script.defer = true;
                 script.onerror = reject;
@@ -81,13 +81,13 @@ $mapsApiKey = $block->getReferrerApiKey();
             <button
                 @click="searchByLocation(cityName)"
                 :disabled="!cityName.trim() || isLoading"
-                class="btn btn-primary px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto">
+                class="btn btn-primary">
                 <?= $escaper->escapeHtml(__('Search')) ?>
             </button>
             <button
                 @click="useCurrentLocation()"
                 :disabled="isLoading"
-                class="btn btn-secondary px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 w-full sm:w-auto">
+                class="btn btn-secondary">
                 📍
             </button>
         </div>
@@ -307,7 +307,9 @@ $mapsApiKey = $block->getReferrerApiKey();
 
                 try {
                     this.autocomplete = new this.mapsApi.places.Autocomplete(this.$refs.cityInput, {
-                        componentRestrictions: { country: 'sa' },
+                        componentRestrictions: {
+                            country: 'sa'
+                        },
                         fields: ['address_components', 'formatted_address', 'geometry', 'name'],
                         types: ['geocode']
                     });
@@ -325,9 +327,9 @@ $mapsApiKey = $block->getReferrerApiKey();
                     return;
                 }
 
-                const place = typeof this.autocomplete.getPlace === 'function'
-                    ? this.autocomplete.getPlace()
-                    : null;
+                const place = typeof this.autocomplete.getPlace === 'function' ?
+                    this.autocomplete.getPlace() :
+                    null;
 
                 if (!place || !place.geometry || !place.geometry.location) {
                     const fallback = (this.cityName || '').trim();
@@ -396,8 +398,9 @@ $mapsApiKey = $block->getReferrerApiKey();
                                 window.removeEventListener('private-content-loaded', this.privateContentListener);
                                 this.privateContentListener = null;
                             }
-                        },
-                        { once: true }
+                        }, {
+                            once: true
+                        }
                     );
                 }
             },
@@ -431,12 +434,12 @@ $mapsApiKey = $block->getReferrerApiKey();
 
                 const hyvaData = window.hyva && window.hyva.mapData ? window.hyva.mapData : null;
 
-                const branchLat = branchData && typeof branchData === 'object'
-                    ? (branchData.customer_latitude ?? branchData.latitude ?? branchData.lat)
-                    : undefined;
-                const branchLng = branchData && typeof branchData === 'object'
-                    ? (branchData.customer_longitude ?? branchData.longitude ?? branchData.lng)
-                    : undefined;
+                const branchLat = branchData && typeof branchData === 'object' ?
+                    (branchData.customer_latitude ?? branchData.latitude ?? branchData.lat) :
+                    undefined;
+                const branchLng = branchData && typeof branchData === 'object' ?
+                    (branchData.customer_longitude ?? branchData.longitude ?? branchData.lng) :
+                    undefined;
 
                 const lat = this.parseCoordinate(branchLat);
                 const lng = this.parseCoordinate(branchLng);
@@ -452,8 +455,7 @@ $mapsApiKey = $block->getReferrerApiKey();
                 }
 
                 const label =
-                    this.buildLocationLabel(
-                        {
+                    this.buildLocationLabel({
                             branch: branchData || {},
                             shipping: {},
                             prefill: hyvaData && hyvaData.prefill ? hyvaData.prefill : {},
@@ -477,7 +479,11 @@ $mapsApiKey = $block->getReferrerApiKey();
                     return;
                 }
 
-                const { lat, lng, label } = this.extractLocationFromDetail(event.detail);
+                const {
+                    lat,
+                    lng,
+                    label
+                } = this.extractLocationFromDetail(event.detail);
 
                 if (lat === null || lng === null) {
                     return;
@@ -511,7 +517,11 @@ $mapsApiKey = $block->getReferrerApiKey();
 
             extractLocationFromDetail(detail) {
                 if (!detail || typeof detail !== 'object') {
-                    return { lat: null, lng: null, label: '' };
+                    return {
+                        lat: null,
+                        lng: null,
+                        label: ''
+                    };
                 }
 
                 const branch = detail.branch || {};
@@ -535,9 +545,17 @@ $mapsApiKey = $block->getReferrerApiKey();
                     prefill.lng
                 );
 
-                const label = this.buildLocationLabel({ branch, shipping, prefill }, lat, lng);
+                const label = this.buildLocationLabel({
+                    branch,
+                    shipping,
+                    prefill
+                }, lat, lng);
 
-                return { lat, lng, label };
+                return {
+                    lat,
+                    lng,
+                    label
+                };
             },
 
             buildLocationLabel(context, lat, lng) {
@@ -647,15 +665,15 @@ $mapsApiKey = $block->getReferrerApiKey();
                 const force = Boolean(options.force);
                 const customMessage = options.loadingMessage;
 
-                const displayLabel = (label || '').toString().trim()
-                    || this.formatCoordinatesLabel(normalizedLat, normalizedLng);
+                const displayLabel = (label || '').toString().trim() ||
+                    this.formatCoordinatesLabel(normalizedLat, normalizedLng);
 
                 if (!force && this.lastSearchedCoords && this.coordinatesAreEqual(
-                    this.lastSearchedCoords.lat,
-                    this.lastSearchedCoords.lng,
-                    normalizedLat,
-                    normalizedLng
-                )) {
+                        this.lastSearchedCoords.lat,
+                        this.lastSearchedCoords.lng,
+                        normalizedLat,
+                        normalizedLng
+                    )) {
                     this.searchedLocation = displayLabel;
 
                     if (!keepInput) {
@@ -669,8 +687,8 @@ $mapsApiKey = $block->getReferrerApiKey();
                     this.isLoading = true;
                 }
 
-                this.loadingMessage = customMessage
-                    || '<?= $escaper->escapeJs(__('Searching for available stores...')) ?>';
+                this.loadingMessage = customMessage ||
+                    '<?= $escaper->escapeJs(__('Searching for available stores...')) ?>';
                 this.searchPerformed = true;
                 this.availableStores = [];
                 this.searchedLocation = displayLabel;
@@ -679,7 +697,10 @@ $mapsApiKey = $block->getReferrerApiKey();
                     this.cityName = displayLabel;
                 }
 
-                this.lastSearchedCoords = { lat: normalizedLat, lng: normalizedLng };
+                this.lastSearchedCoords = {
+                    lat: normalizedLat,
+                    lng: normalizedLng
+                };
 
                 try {
                     await this.searchAvailableStores(normalizedLat, normalizedLng);
@@ -766,14 +787,20 @@ $mapsApiKey = $block->getReferrerApiKey();
                     ];
 
                     const geocodeResults = await this.geocodeWithQueries(queries);
-                    const cityCandidate = this.resolveBestCandidate(geocodeResults, cityName, { preferCity: true });
+                    const cityCandidate = this.resolveBestCandidate(geocodeResults, cityName, {
+                        preferCity: true
+                    });
 
                     if (cityCandidate) {
                         return cityCandidate;
                     }
 
-                    const placesResults = await this.findPlaces(queries, { preferCity: true });
-                    return this.resolveBestCandidate(placesResults, cityName, { preferCity: true });
+                    const placesResults = await this.findPlaces(queries, {
+                        preferCity: true
+                    });
+                    return this.resolveBestCandidate(placesResults, cityName, {
+                        preferCity: true
+                    });
                 } catch (error) {
                     console.error('Geocoding error:', error);
                     return null;
@@ -792,14 +819,20 @@ $mapsApiKey = $block->getReferrerApiKey();
                     ];
 
                     const geocodeResults = await this.geocodeWithQueries(queries);
-                    const regionCandidate = this.resolveBestCandidate(geocodeResults, regionName, { preferRegion: true });
+                    const regionCandidate = this.resolveBestCandidate(geocodeResults, regionName, {
+                        preferRegion: true
+                    });
 
                     if (regionCandidate) {
                         return regionCandidate;
                     }
 
-                    const placesResults = await this.findPlaces(queries, { preferRegion: true });
-                    return this.resolveBestCandidate(placesResults, regionName, { preferRegion: true });
+                    const placesResults = await this.findPlaces(queries, {
+                        preferRegion: true
+                    });
+                    return this.resolveBestCandidate(placesResults, regionName, {
+                        preferRegion: true
+                    });
                 } catch (error) {
                     console.error('Geocoding region error:', error);
                     return null;
@@ -816,7 +849,9 @@ $mapsApiKey = $block->getReferrerApiKey();
                 for (const query of queries) {
                     const results = await this.runGeocode({
                         address: query,
-                        componentRestrictions: { country: 'SA' }
+                        componentRestrictions: {
+                            country: 'SA'
+                        }
                     });
 
                     if (results.length) {
@@ -989,18 +1024,27 @@ $mapsApiKey = $block->getReferrerApiKey();
                     const lng = typeof geometry.location.lng === 'function' ? geometry.location.lng() : geometry.location.lng;
 
                     if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
-                        return { lat, lng };
+                        return {
+                            lat,
+                            lng
+                        };
                     }
                 }
 
                 if (geometry.viewport && typeof geometry.viewport.getCenter === 'function') {
                     const center = geometry.viewport.getCenter();
-                    return { lat: center.lat(), lng: center.lng() };
+                    return {
+                        lat: center.lat(),
+                        lng: center.lng()
+                    };
                 }
 
                 if (geometry.bounds && typeof geometry.bounds.getCenter === 'function') {
                     const center = geometry.bounds.getCenter();
-                    return { lat: center.lat(), lng: center.lng() };
+                    return {
+                        lat: center.lat(),
+                        lng: center.lng()
+                    };
                 }
 
                 return null;
@@ -1112,7 +1156,10 @@ $mapsApiKey = $block->getReferrerApiKey();
                 const lng = parseFloat(result.lon ?? result.lng);
 
                 if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
-                    return { lat, lng };
+                    return {
+                        lat,
+                        lng
+                    };
                 }
 
                 if (Array.isArray(result.boundingbox) && result.boundingbox.length === 4) {
@@ -1205,8 +1252,7 @@ $mapsApiKey = $block->getReferrerApiKey();
                     await this.refreshStoresForCoordinates(
                         position.coords.latitude,
                         position.coords.longitude,
-                        currentLocationLabel,
-                        {
+                        currentLocationLabel, {
                             maintainLoading: true,
                             keepInput: true,
                             force: true

@@ -718,29 +718,71 @@ class StockHelper extends AbstractHelper
     {
         try {
             if (isset($this->deliverabilityCache[$sku][$sourceCode])) {
+                $this->logger->debug('[StockHelper] Using cached deliverability result.', [
+                    'sku' => $sku,
+                    'source_code' => $sourceCode,
+                    'is_deliverable' => $this->deliverabilityCache[$sku][$sourceCode],
+                ]);
                 return $this->deliverabilityCache[$sku][$sourceCode];
             }
 
+            $product = $this->productRepository->get($sku);
+            $productType = $product->getTypeId();
+            $isComposite = in_array($productType, [Configurable::TYPE_CODE, Grouped::TYPE_CODE], true);
+
             // Step 1: Handle the special "NATIONWIDE_SHIPPING" source code
             if ($sourceCode === 'NATIONWIDE_SHIPPING') {
-                $product = $this->productRepository->get($sku);
                 $hasGlobalShipping = $this->hasGlobalShipping($product);
-                $this->deliverabilityCache[$sku][$sourceCode] = $hasGlobalShipping;
-                return $hasGlobalShipping;
+
+                $this->logger->debug('[StockHelper] Nationwide shipping check.', [
+                    'sku' => $sku,
+                    'source_code' => $sourceCode,
+                    'has_global_shipping' => $hasGlobalShipping,
+                    'composite_product' => $isComposite,
+                ]);
+
+                if ($hasGlobalShipping) {
+                    $this->deliverabilityCache[$sku][$sourceCode] = true;
+                    return true;
+                }
+
+                if ($isComposite) {
+                    return $this->evaluateCompositeDeliverability($product, $sourceCode);
+                }
+
+                $this->logger->debug('[StockHelper] Nationwide shipping unavailable without global flag; marking requestable.', [
+                    'sku' => $sku,
+                    'source_code' => $sourceCode,
+                ]);
+                $this->deliverabilityCache[$sku][$sourceCode] = false;
+                return false;
             }
 
             // Step 2: For actual sources, check if product has global shipping enabled (products with global shipping are deliverable from any actual source)
-            $product = $this->productRepository->get($sku); // Ensure product is loaded
             $hasGlobalShipping = $this->hasGlobalShipping($product);
 
             if ($hasGlobalShipping) {
+                $this->logger->debug('[StockHelper] Product has global shipping; marking as deliverable for source.', [
+                    'sku' => $sku,
+                    'source_code' => $sourceCode,
+                ]);
                 $this->deliverabilityCache[$sku][$sourceCode] = true;
                 return true;
+            }
+
+            if ($isComposite) {
+                return $this->evaluateCompositeDeliverability($product, $sourceCode);
             }
 
             // Step 3: For actual sources and non-global shipping products, check precomputed deliverability status
             $isDeliverable = $this->getDeliverabilityStatus($sku, $sourceCode);
             $this->deliverabilityCache[$sku][$sourceCode] = $isDeliverable;
+
+            $this->logger->debug('[StockHelper] Determined deliverability from precomputed table.', [
+                'sku' => $sku,
+                'source_code' => $sourceCode,
+                'is_deliverable' => $isDeliverable,
+            ]);
 
             return $isDeliverable; // No need for the if/else here
 
@@ -755,6 +797,70 @@ class StockHelper extends AbstractHelper
             $this->deliverabilityCache[$sku][$sourceCode] = false;
             return false;
         }
+    }
+
+    /**
+     * Evaluate deliverability for composite products by inspecting child products.
+     *
+     * @param \Magento\Catalog\Model\Product $product
+     */
+    private function evaluateCompositeDeliverability($product, string $sourceCode): bool
+    {
+        $sku = (string) $product->getSku();
+        $childSkus = $this->getChildSkus($product);
+
+        if (empty($childSkus)) {
+            $this->logger->debug('[StockHelper] Composite product has no children; falling back to direct deliverability flag.', [
+                'sku' => $sku,
+                'source_code' => $sourceCode,
+            ]);
+
+            $isDeliverable = $this->getDeliverabilityStatus($sku, $sourceCode);
+            $this->deliverabilityCache[$sku][$sourceCode] = $isDeliverable;
+            return $isDeliverable;
+        }
+
+        $deliverableChildren = [];
+        $requestableChildren = [];
+
+        $this->logger->debug('[StockHelper] Evaluating composite product deliverability from child items.', [
+            'sku' => $sku,
+            'source_code' => $sourceCode,
+            'child_skus' => $childSkus,
+        ]);
+
+        foreach ($childSkus as $childSku) {
+            if ($childSku === $sku) {
+                $this->logger->warning('[StockHelper] Skipping self-referential child SKU during composite evaluation.', [
+                    'sku' => $sku,
+                    'source_code' => $sourceCode,
+                ]);
+                continue;
+            }
+
+            $childDeliverable = $this->isProductDeliverable($childSku, $sourceCode);
+
+            if ($childDeliverable) {
+                $deliverableChildren[] = $childSku;
+            } else {
+                $requestableChildren[] = $childSku;
+            }
+        }
+
+        $isDeliverable = !empty($deliverableChildren);
+
+        $this->logger->debug('[StockHelper] Aggregated child deliverability for composite product.', [
+            'sku' => $sku,
+            'source_code' => $sourceCode,
+            'child_count' => count($childSkus),
+            'deliverable_children' => $deliverableChildren,
+            'requestable_children' => $requestableChildren,
+            'is_deliverable' => $isDeliverable,
+        ]);
+
+        $this->deliverabilityCache[$sku][$sourceCode] = $isDeliverable;
+
+        return $isDeliverable;
     }
 
 
@@ -844,12 +950,25 @@ class StockHelper extends AbstractHelper
             $result = $connection->fetchOne($select);
 
             if ($result !== false) {
+                $this->logger->debug('[StockHelper] Loaded deliverability flag from database.', [
+                    'sku' => $sku,
+                    'source_code' => $sourceCode,
+                    'database_value' => (bool) $result,
+                ]);
                 return (bool)$result;
             }
 
             // If there's no entry in the table, default to not deliverable
+            $this->logger->debug('[StockHelper] No deliverability record found; defaulting to requestable.', [
+                'sku' => $sku,
+                'source_code' => $sourceCode,
+            ]);
             return false;
         } catch (\Exception $e) {
+            $this->logger->error('[StockHelper] Failed to fetch deliverability status: ' . $e->getMessage(), [
+                'sku' => $sku,
+                'source_code' => $sourceCode,
+            ]);
             return false;
         }
     }

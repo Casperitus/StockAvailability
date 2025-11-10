@@ -1,12 +1,5 @@
 <?php
 
-/**
- * Hyvä Themes - https://hyva.io
- * Copyright © Hyvä Themes 2020-present. All rights reserved.
- * This product is licensed per Magento install
- * See https://hyva.io/license
- */
-
 declare(strict_types=1);
 
 use Hyva\Theme\Model\ViewModelRegistry;
@@ -30,81 +23,52 @@ if (!$product || !$product->getId()) {
     return;
 }
 
-// Original Hyvä logic for stock:
 $inStock = $product->getIsSalable();
+$deliverableValue = $product->getData('is_deliverable');
+$deliverableFlag = $product->getData('is_deliverable_flag');
+$deliverableLabelData = $product->getData('is_deliverable_label');
+
+if ($deliverableFlag === null && is_string($deliverableLabelData)) {
+    $deliverableFlag = strcasecmp($deliverableLabelData, 'Deliverable') === 0;
+}
+
+if ($deliverableFlag === null && $deliverableValue !== null) {
+    if (is_bool($deliverableValue)) {
+        $deliverableFlag = $deliverableValue;
+    } elseif (is_string($deliverableValue)) {
+        $deliverableFlag = strcasecmp($deliverableValue, 'Deliverable') === 0;
+    } else {
+        $deliverableFlag = ((int) $deliverableValue) === 1;
+    }
+}
+
+$isDeliverable = $deliverableFlag === null ? null : (bool) $deliverableFlag;
+
+$deliverabilityLabel = $isDeliverable === null
+    ? __('Please select location')
+    : ($deliverableLabelData ? __($deliverableLabelData) : ($isDeliverable ? __('Deliverable') : __('Requestable')));
+
+$deliverabilityClasses = match ($isDeliverable) {
+    true => ['container' => 'bg-green-100 text-green-800', 'dot' => 'bg-green-500'],
+    false => ['container' => 'bg-red-100 text-red-800', 'dot' => 'bg-red-500'],
+    default => ['container' => 'bg-gray-100 text-gray-700', 'dot' => 'bg-gray-500'],
+};
 ?>
 
 <?php if ($block->getParentBlock()->displayProductStockStatus()): ?>
-    <!-- We wrap everything in x-data to register SKU and show second line for deliverability -->
-    <div
-        x-data="{
-            sku: '<?= $escaper->escapeJs($product->getSku()) ?>',
+    <div class="flex flex-col gap-2">
+        <div class="flex items-center gap-2 p-2 rounded-lg <?= $inStock ? 'bg-green-100' : 'bg-red-100' ?>">
+            <span class="w-3 h-3 rounded-full shrink-0 <?= $inStock ? 'bg-green-500' : 'bg-red-500' ?>"></span>
+            <span class="text-gray-800 text-sm">
+                <?= $escaper->escapeHtml($inStock ? __('In stock') : __('Out of stock')) ?>
+            </span>
+        </div>
 
-            get selectedSourceCode() {
-                return Alpine.store('deliverability').selected_source_code || '';
-            },
-
-            // If there's a source code, read the deliverability map
-            get isDeliverable() {
-                return Alpine.store('deliverability').map[this.sku] === 'Yes';
-            },
-
-            get deliverabilityLabel() {
-                if (!this.selectedSourceCode) {
-                    return '<?= $escaper->escapeHtml(__('Please select location')) ?>';
-                }
-                return this.isDeliverable
-                    ? '<?= $escaper->escapeHtml(__('Deliverable')) ?>'
-                    : '<?= $escaper->escapeHtml(__('Undeliverable')) ?>';
-            },
-
-            init() {
-                // Register SKU with DeliverabilityService
-                DeliverabilityService.registerSku(this.sku);
-            },
-
-            // Optional: method to open location modal
-            openLocationModal() {
-                if (window.toggleDeliveryLocationModal) {
-                    window.toggleDeliveryLocationModal();
-                } else {
-                    console.warn('toggleDeliveryLocationModal not found');
-                }
-            }
-        }">
-        <div class="flex items-center gap-4">
-            <!-- Stock Availability -->
-            <div
-                class="flex items-center gap-2 p-2 rounded-lg <?= $inStock ? 'bg-green-100' : 'bg-red-100' ?>"
-                title="<?= $escaper->escapeHtmlAttr(__('Availability')) ?>">
-                <span
-                    class="w-3 h-3 rounded-full shrink-0 <?= $inStock ? 'bg-green-500' : 'bg-red-500' ?>">
-                </span>
-                <span class="text-gray-800 text-sm">
-                    <?= $escaper->escapeHtml($inStock ? __('In stock') : __('Out of stock')) ?>
-                </span>
-            </div>
-
-            <!-- Delivery Availability -->
-            <div
-                class="flex items-center gap-2 p-2 rounded-lg"
-                :class="(selectedSourceCode && isDeliverable) ? 'bg-green-100' : (selectedSourceCode ? 'bg-red-100' : 'bg-gray-200')"
-                title="<?= $escaper->escapeHtmlAttr(__('Delivery Availability')) ?>">
-                <!-- Dot changes color if source code is set -->
-                <span
-                    class="w-3 h-3 rounded-full shrink-0"
-                    :class="(selectedSourceCode && isDeliverable)
-                             ? 'bg-green-500'
-                             : (selectedSourceCode ? 'bg-red-500' : 'bg-gray-500')">
-                </span>
-
-                <!-- The text will show "Please select location" (clickable), or "Deliverable"/"Undeliverable" -->
-                <span class="text-gray-800 text-sm">
-                    <a href="javascript:void(0)" @click="openLocationModal()"
-                        x-text="deliverabilityLabel"
-                        class="cursor-pointer"></a>
-                </span>
-            </div>
+        <div class="flex items-center gap-2 p-2 rounded-lg <?= $deliverabilityClasses['container'] ?>">
+            <span class="w-3 h-3 rounded-full shrink-0 <?= $deliverabilityClasses['dot'] ?>"></span>
+            <span class="text-sm">
+                <?= $escaper->escapeHtml($deliverabilityLabel) ?>
+            </span>
         </div>
     </div>
 <?php endif; ?>
