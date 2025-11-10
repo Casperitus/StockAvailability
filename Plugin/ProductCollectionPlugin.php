@@ -29,6 +29,39 @@ class ProductCollectionPlugin
         $this->logger = $logger;
     }
 
+    private function resolveSourceCode(): ?string
+    {
+        $sourceCode = $this->customerSession->getData('selected_source_code');
+        if (is_string($sourceCode) && $sourceCode !== '') {
+            return $sourceCode;
+        }
+
+        $latitude = $this->customerSession->getData('customer_latitude');
+        $longitude = $this->customerSession->getData('customer_longitude');
+
+        if ($latitude !== null && $longitude !== null && is_numeric($latitude) && is_numeric($longitude)) {
+            $resolved = $this->stockHelper->findNearestSourceCode((float) $latitude, (float) $longitude);
+
+            if ($resolved) {
+                $this->customerSession->setData('selected_source_code', $resolved);
+                $this->logger->debug('Resolved source code from stored coordinates.', [
+                    'latitude' => $latitude,
+                    'longitude' => $longitude,
+                    'resolved_source' => $resolved,
+                ]);
+
+                return $resolved;
+            }
+
+            $this->logger->debug('Unable to resolve source code from stored coordinates.', [
+                'latitude' => $latitude,
+                'longitude' => $longitude,
+            ]);
+        }
+
+        return null;
+    }
+
     public function afterLoad(Collection $subject, Collection $result): Collection
     {
         if ($result->getFlag('stock_availability_processing')) {
@@ -44,8 +77,7 @@ class ProductCollectionPlugin
                 return $result;
             }
 
-            $sourceCode = $this->customerSession->getData('selected_source_code');
-            $sourceCode = $sourceCode ? (string) $sourceCode : null;
+            $sourceCode = $this->resolveSourceCode();
 
             $this->logger->debug('Evaluating deliverability for product collection.', [
                 'selected_source_code' => $sourceCode,
@@ -54,26 +86,27 @@ class ProductCollectionPlugin
 
             foreach ($items as $product) {
                 $sku = (string) $product->getSku();
-                $isDeliverable = true;
+                $hasSource = $sourceCode !== null && $sourceCode !== '';
+                $isDeliverable = $hasSource
+                    ? $this->stockHelper->isProductDeliverable($sku, $sourceCode)
+                    : false;
 
-                if ($sourceCode) {
-                    $isDeliverable = $this->stockHelper->isProductDeliverable($sku, $sourceCode);
-                } else {
-                    $this->logger->debug('No source selected; defaulting collection item to deliverable.', [
+                if (!$hasSource) {
+                    $this->logger->debug('No source selected; marking product as requestable in collection.', [
                         'sku' => $sku,
                     ]);
                 }
 
                 $this->deliverabilityAttribute->apply($product, $isDeliverable);
 
-                if (!$isDeliverable) {
-                    $product->setIsSalable(false);
-                    $this->logger->debug(sprintf('Product %s marked as requestable in collection.', $sku));
-                } else {
+                if ($isDeliverable) {
                     $this->logger->debug('Product marked as deliverable in collection.', [
                         'sku' => $sku,
                         'source_code' => $sourceCode,
                     ]);
+                } elseif ($hasSource) {
+                    $product->setIsSalable(false);
+                    $this->logger->debug(sprintf('Product %s marked as requestable in collection.', $sku));
                 }
             }
 

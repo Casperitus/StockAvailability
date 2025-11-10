@@ -44,6 +44,7 @@ class UpdateIsDeliverableAttribute implements DataPatchInterface, PatchVersionIn
             }
 
             $fieldsToUpdate = [
+                'frontend_label' => 'Is Deliverable',
                 'is_filterable' => 0,
                 'is_filterable_in_search' => 0,
                 'is_filterable_in_grid' => 0,

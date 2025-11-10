@@ -20,6 +20,39 @@ class ProductPlugin
     /** @var array<string,bool> */
     private array $validatedSkus = [];
 
+    private function resolveSourceCode(): ?string
+    {
+        $sourceCode = $this->customerSession->getData('selected_source_code');
+        if (is_string($sourceCode) && $sourceCode !== '') {
+            return $sourceCode;
+        }
+
+        $latitude = $this->customerSession->getData('customer_latitude');
+        $longitude = $this->customerSession->getData('customer_longitude');
+
+        if ($latitude !== null && $longitude !== null && is_numeric($latitude) && is_numeric($longitude)) {
+            $resolved = $this->stockHelper->findNearestSourceCode((float) $latitude, (float) $longitude);
+
+            if ($resolved) {
+                $this->customerSession->setData('selected_source_code', $resolved);
+                $this->logger->debug('Resolved source code from stored coordinates during PDP evaluation.', [
+                    'latitude' => $latitude,
+                    'longitude' => $longitude,
+                    'resolved_source' => $resolved,
+                ]);
+
+                return $resolved;
+            }
+
+            $this->logger->debug('Unable to resolve source code from stored coordinates during PDP evaluation.', [
+                'latitude' => $latitude,
+                'longitude' => $longitude,
+            ]);
+        }
+
+        return null;
+    }
+
     private function getCacheKey(string $sku, ?string $sourceCode): string
     {
         return sprintf('%s|%s', $sku, $sourceCode ?? '');
@@ -41,8 +74,7 @@ class ProductPlugin
     {
         $sku = (string) $subject->getSku();
 
-        $sourceCode = $this->customerSession->getData('selected_source_code');
-        $normalizedSource = $sourceCode ? (string) $sourceCode : null;
+        $normalizedSource = $this->resolveSourceCode();
 
         $this->logger->debug('Evaluating deliverability during isSaleable.', [
             'sku' => $sku,
@@ -70,9 +102,11 @@ class ProductPlugin
         }
 
         if (!$normalizedSource) {
-            $this->logger->debug(sprintf('No source selected for SKU %s, defaulting to deliverable.', $sku));
-            $this->validatedSkus[$cacheKey] = true;
-            $this->deliverabilityAttribute->apply($subject, true);
+            $this->logger->debug('No source selected; marking product as requestable until a branch is chosen.', [
+                'sku' => $sku,
+            ]);
+            $this->validatedSkus[$cacheKey] = false;
+            $this->deliverabilityAttribute->apply($subject, false);
             return $result;
         }
 

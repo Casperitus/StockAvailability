@@ -45,7 +45,7 @@ class AddIsDeliverableAttribute implements DataPatchInterface, PatchVersionInter
                     self::ATTRIBUTE_CODE,
                     [
                         'type' => 'int',
-                        'label' => 'Deliverability',
+                        'label' => 'Is Deliverable',
                         'input' => 'select',
                         'backend' => '',
                         'frontend' => '',
