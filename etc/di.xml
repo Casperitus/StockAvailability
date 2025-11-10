@@ -53,4 +53,40 @@
         </arguments>
     </type>
 
+    <type name="Madar\StockAvailability\Helper\StockHelper">
+        <arguments>
+            <argument name="logger" xsi:type="object">Madar\StockAvailability\Logger\Location</argument>
+        </arguments>
+    </type>
+
+    <type name="Madar\StockAvailability\Model\DeliverabilityAttribute">
+        <arguments>
+            <argument name="logger" xsi:type="object">Madar\StockAvailability\Logger\Location</argument>
+        </arguments>
+    </type>
+
+    <type name="Madar\StockAvailability\Plugin\ProductPlugin">
+        <arguments>
+            <argument name="logger" xsi:type="object">Madar\StockAvailability\Logger\Location</argument>
+        </arguments>
+    </type>
+
+    <type name="Madar\StockAvailability\Plugin\ProductCollectionPlugin">
+        <arguments>
+            <argument name="logger" xsi:type="object">Madar\StockAvailability\Logger\Location</argument>
+        </arguments>
+    </type>
+
+    <type name="Madar\StockAvailability\Plugin\Cart\ItemRendererPlugin">
+        <arguments>
+            <argument name="logger" xsi:type="object">Madar\StockAvailability\Logger\Location</argument>
+        </arguments>
+    </type>
+
+    <type name="Madar\StockAvailability\Plugin\Quote\ValidateDeliverability">
+        <arguments>
+            <argument name="logger" xsi:type="object">Madar\StockAvailability\Logger\Location</argument>
+        </arguments>
+    </type>
+
 </config>
