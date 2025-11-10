@@ -20,7 +20,22 @@ class Grouped extends MagentoGrouped
 
         foreach ($associatedProducts as $subProduct) {
             if (!isset($productsInfo[$subProduct->getId()])) {
-                if ($isStrictProcessMode && !$subProduct->getQty() && $subProduct->isSalable() && $subProduct->getData('is_deliverable')) {
+                $isDeliverableFlag = $subProduct->getData('is_deliverable_flag');
+                $deliverableValue = $subProduct->getData('is_deliverable');
+
+                if ($isDeliverableFlag !== null) {
+                    $isDeliverable = (bool) $isDeliverableFlag;
+                } elseif ($deliverableValue === null) {
+                    $isDeliverable = true;
+                } elseif (is_bool($deliverableValue)) {
+                    $isDeliverable = $deliverableValue;
+                } elseif (is_string($deliverableValue)) {
+                    $isDeliverable = strcasecmp($deliverableValue, 'Deliverable') === 0;
+                } else {
+                    $isDeliverable = ((int) $deliverableValue) === 1;
+                }
+
+                if ($isStrictProcessMode && !$subProduct->getQty() && $subProduct->isSalable() && $isDeliverable) {
                     return __('Please specify the quantity of product(s).')->render();
                 }
 

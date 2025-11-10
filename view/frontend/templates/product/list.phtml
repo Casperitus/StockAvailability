@@ -1,9 +1,5 @@
 <?php
 
-/**
- * Override for Hyvä product list to add deliverability filtering
- */
-
 use Hyva\Theme\Model\ViewModelRegistry;
 use Hyva\Theme\ViewModel\CurrentCategory;
 use Hyva\Theme\ViewModel\ProductListItem;
@@ -27,36 +23,12 @@ $productCollection = $block->getLoadedProductCollection();
         <div><?= $escaper->escapeHtml(__('We can\'t find products matching the selection.')) ?></div>
     </div>
 <?php else: ?>
-    <?php // This block for showing the hidden count is fine and requires no changes. 
-    ?>
-    <div x-data="{
-    get hiddenCount() {
-        if (!Alpine.store('deliverability')?.hideUndeliverable || !Alpine.store('deliverability')?.selected_source_code) {
-            return 0;
-        }
-        const products = document.querySelectorAll('[data-product-sku]');
-        let hidden = 0;
-        products.forEach(el => {
-            const sku = el.getAttribute('data-product-sku');
-            if (!Alpine.store('deliverability').isDeliverable(sku)) {
-                hidden++;
-            }
-        });
-        return hidden;
-    }
-}" x-show="hiddenCount > 0" class="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md" style="display: none;">
-        <p class="text-sm text-yellow-800">
-            <span x-text="hiddenCount"></span> <?= $escaper->escapeHtml(__('undeliverable items are hidden.')) ?>
-            <?= $escaper->escapeHtml(__('Some items from other pages might be deliverable.')) ?>
-        </p>
-    </div>
-
     <section class="py-8" id="product-list" aria-label="<?= $escaper->escapeHtmlAttr(__('Product list')) ?>" tabindex="-1">
         <?= $block->getToolbarHtml() ?>
         <?= $block->getAdditionalHtml() ?>
 
         <?php
-        if ($block->getMode() == 'grid') {
+        if ($block->getMode() === 'grid') {
             $viewMode = 'grid';
             $imageDisplayArea = 'category_page_grid';
             $showDescription = false;
@@ -71,24 +43,26 @@ $productCollection = $block->getLoadedProductCollection();
 
         <div class="products wrapper mode-<?= $viewMode ?> products-<?= $viewMode ?>">
             <ul role="list" class="mx-auto pt-4 pb-12 grid gap-4 grid-cols-1 <?= $viewMode === 'grid' ? 'sm:grid-cols-2 xl:grid-cols-3' : '' ?>">
-
                 <?php foreach (array_values($productCollection->getItems()) as $i => $product): ?>
                     <?php
                     if ($i < $eagerLoadImagesCount) {
                         $product->setData('image_custom_attributes', ['loading' => 'eager', 'fetchpriority' => 'high']);
                     }
-                    ?>
 
-                    <?php // UPDATED: The Alpine.js directives are now simpler and more direct. 
+                    $deliverableValue = $product->getData('is_deliverable');
+                    $isDeliverable = is_bool($deliverableValue)
+                        ? $deliverableValue
+                        : (is_string($deliverableValue)
+                            ? strcasecmp($deliverableValue, 'Deliverable') === 0
+                            : ((int) $deliverableValue === 1));
+                    $deliverableLabel = $isDeliverable
+                        ? __('Deliverable')
+                        : __('Requestable');
+                    $badgeClasses = $isDeliverable
+                        ? 'bg-green-100 text-green-800'
+                        : 'bg-yellow-100 text-yellow-800';
                     ?>
-                    <li class="flex flex-col"
-                        x-data="{ sku: '<?= $escaper->escapeJs($product->getSku()) ?>' }"
-                        x-init="DeliverabilityService.registerSku(sku)"
-                        x-show="!($store.deliverability.hideUndeliverable && !$store.deliverability.isDeliverable(sku))"
-                        x-cloak
-                        x-transition
-                        data-product-sku="<?= $escaper->escapeHtmlAttr($product->getSku()) ?>">
-
+                    <li class="flex flex-col gap-3" data-product-sku="<?= $escaper->escapeHtmlAttr($product->getSku()) ?>">
                         <?= $productListItemViewModel->getItemHtml(
                             $product,
                             $block,
@@ -97,6 +71,10 @@ $productCollection = $block->getLoadedProductCollection();
                             $imageDisplayArea,
                             $showDescription
                         ); ?>
+                        <span class="inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded <?= $badgeClasses ?>">
+                            <span class="w-2 h-2 rounded-full <?= $isDeliverable ? 'bg-green-500' : 'bg-yellow-500' ?>"></span>
+                            <?= $escaper->escapeHtml($deliverableLabel) ?>
+                        </span>
                     </li>
                 <?php endforeach; ?>
             </ul>

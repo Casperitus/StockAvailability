@@ -69,17 +69,17 @@ class ConfigurableSwatchRendererPlugin
             // Calculate deliverability
             $isDeliverable = $sourceCode
                 ? $this->stockHelper->isProductDeliverable($sku, $sourceCode)
-                : true;  // Assume deliverable if no source code is provided
+                : true;
 
-            // Both stock status and deliverability must be true to enable the swatch
-            $isAvailable = $isInStock && $isDeliverable;
-
-            // Add deliverability status to the options array
             $config['attributes']['is_deliverable']['options'][] = [
                 'id' => $productId,
-                'label' => $isAvailable ? 'Yes' : 'No',
+                'label' => $isDeliverable ? 'Deliverable' : 'Requestable',
                 'products' => [$productId]
             ];
+
+            if (!$isDeliverable) {
+                $associatedProduct->setIsSalable(false);
+            }
         }
 
         // Log the final JSON configuration that gets sent to the frontend

@@ -1,12 +1,5 @@
 <?php
 
-/**
- * Hyvä Themes - https://hyva.io
- * Copyright © Hyvä Themes 2020-present. All rights reserved.
- * This product is licensed per Magento install
- * See https://hyva.io/license
- */
-
 declare(strict_types=1);
 
 use Hyva\Theme\Model\ViewModelRegistry;
@@ -33,78 +26,47 @@ if (!$product || !$product->getId()) {
     return;
 }
 
-// Determines whether to show "Update item" instead of "Add to Cart"
 $isCartConfigure = (bool) $block->getData('is_cart_configure');
+$deliverableValue = $product->getData('is_deliverable');
+$deliverableFlag = $product->getData('is_deliverable_flag');
+
+if ($deliverableFlag !== null) {
+    $isDeliverable = (bool) $deliverableFlag;
+} elseif ($deliverableValue === null) {
+    $isDeliverable = null;
+} elseif (is_bool($deliverableValue)) {
+    $isDeliverable = $deliverableValue;
+} elseif (is_string($deliverableValue)) {
+    $isDeliverable = strcasecmp($deliverableValue, 'Deliverable') === 0;
+} else {
+    $isDeliverable = ((int) $deliverableValue) === 1;
+}
+
+$defaultLabel = $isCartConfigure ? __('Update item') : __('Add to Cart');
+$buttonLabel = $isDeliverable === false ? __('Request Item') : $defaultLabel;
+$buttonDisabled = $isDeliverable === false;
 ?>
 
-<div
-    x-data="{
-        sku: '<?= $escaper->escapeJs($product->getSku()) ?>',
-        isCartConfigure: <?= $isCartConfigure ? 'true' : 'false' ?>,
+<div class="flex flex-col gap-2 md:flex-row md:items-center">
+    <button
+        type="submit"
+        form="product_addtocart_form"
+        class="btn btn-primary flex items-center gap-2 justify-center w-full md:w-auto"
+        id="product-addtocart-button"
+        data-addto="cart"
+        title="<?= $escaper->escapeHtmlAttr($buttonLabel) ?>"
+        <?= $buttonDisabled ? 'disabled' : '' ?>>
+        <span class="icon-wrapper">
+            <?= $heroicons->shoppingCartHtml('border-current'); ?>
+        </span>
+        <span><?= $escaper->escapeHtml($buttonLabel) ?></span>
+    </button>
 
-        // True if user has selected a branch/location.
-        get hasLocation() {
-            return Alpine.store('deliverability').selected_source_code
-                ? Alpine.store('deliverability').selected_source_code.length > 0
-                : false;
-        },
-
-        // True if this SKU is deliverable in the chosen branch
-        get isDeliverable() {
-            // 'map[sku]' is 'Yes' or 'No' in your deliverability store
-            return Alpine.store('deliverability').map[this.sku] === 'Yes';
-        },
-
-        init() {
-            // Register the SKU so deliverability data can be fetched
-            DeliverabilityService.registerSku(this.sku);
-        },
-
-        // Final label for the button if the item is deliverable
-        get buttonText() {
-            if (!this.isDeliverable) {
-                return '<?= $escaper->escapeHtml(__('Undeliverable')) ?>';
-            }
-            return this.isCartConfigure
-                ? '<?= $escaper->escapeHtml(__('Update item')) ?>'
-                : '<?= $escaper->escapeHtml(__('Add to Cart')) ?>';
-        }
-    }"
-    class="flex-1 md:w-full md:flex-initial lg:w-auto lg:flex-1">
-
-    <!-- If user has NOT chosen a location, show 'Select Location' button -->
-    <template x-if="!hasLocation">
-        <button
-            type="button"
-            class="btn btn-primary flex items-center gap-2 w-full justify-center"
-            @click="window.toggleDeliveryLocationModal()">
-            <?= $heroicons->locationMarkerHtml('border-current'); ?>
-            <span class="hidden sm:block md:hidden lg:block">
-                <?= $escaper->escapeHtml(__('Select Location')) ?>
-            </span>
-        </button>
-    </template>
-
-    <!-- If user HAS chosen a location, show normal 'Add to Cart / Update item' or 'Unavailable for Delivery' -->
-    <template x-if="hasLocation">
-        <button
-            type="submit"
-            form="product_addtocart_form"
-            :disabled="!isDeliverable"
-            :title="buttonText"
-            class="btn btn-primary flex items-center gap-2 w-full justify-center"
-            id="product-addtocart-button"
-            data-addto="cart">
-            <span class="icon-wrapper">
-                <?= $heroicons->shoppingCartHtml('border-current'); ?>
-            </span>
-
-            <span class="hidden sm:block md:hidden lg:block" x-text="buttonText"></span>
-        </button>
-
-
-    </template>
-
+    <?php if ($isDeliverable === false): ?>
+        <span class="text-sm text-red-700">
+            <?= $escaper->escapeHtml(__('This item is requestable for your selected location.')) ?>
+        </span>
+    <?php endif; ?>
 </div>
 
 <div class="additional-actions mt-2">

@@ -4,15 +4,13 @@
         <plugin name="madar_validate_deliverability" type="Madar\StockAvailability\Plugin\Quote\ValidateDeliverability" sortOrder="10" />
     </type>
 
-    <!-- Plugin for Product Collection 
     <type name="Magento\Catalog\Model\ResourceModel\Product\Collection">
-        <plugin name="madar_stock_availability_product_collection" type="Madar\StockAvailability\Plugin\ProductCollectionPlugin" />
+        <plugin name="madar_stock_availability_product_collection" type="Madar\StockAvailability\Plugin\ProductCollectionPlugin" sortOrder="20" />
     </type>
-     Plugin for Product
+
     <type name="Magento\Catalog\Model\Product">
-        <plugin name="madar_stockavailability_product_plugin" type="Madar\StockAvailability\Plugin\ProductPlugin" />
+        <plugin name="madar_stockavailability_product_plugin" type="Madar\StockAvailability\Plugin\ProductPlugin" sortOrder="20" />
     </type>
--->
     <!-- Custom Grouped Product Type -->
     <preference for="Magento\GroupedProduct\Model\Product\Type\Grouped" type="Madar\StockAvailability\Model\Product\Type\Grouped" />
 
