@@ -33,6 +33,11 @@ class DisableIsDeliverableLayeredNavigation implements DataPatchInterface, Patch
         try {
             $eavSetup = $this->eavSetupFactory->create(['setup' => $this->moduleDataSetup]);
 
+            $attribute = $eavSetup->getAttribute(Product::ENTITY, self::ATTRIBUTE_CODE);
+            if (!$attribute) {
+                return;
+            }
+
             $fieldsToUpdate = [
                 'is_filterable' => 0,
                 'is_filterable_in_search' => 0,
