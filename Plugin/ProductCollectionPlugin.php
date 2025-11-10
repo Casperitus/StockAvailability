@@ -89,10 +89,10 @@ class ProductCollectionPlugin
                 $hasSource = $sourceCode !== null && $sourceCode !== '';
                 $isDeliverable = $hasSource
                     ? $this->stockHelper->isProductDeliverable($sku, $sourceCode)
-                    : false;
+                    : true;
 
                 if (!$hasSource) {
-                    $this->logger->debug('No source selected; marking product as requestable in collection.', [
+                    $this->logger->debug('No source selected; defaulting product to deliverable in collection.', [
                         'sku' => $sku,
                     ]);
                 }
