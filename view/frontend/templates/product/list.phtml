@@ -51,10 +51,10 @@ $productCollection = $block->getLoadedProductCollection();
 
                     $deliverableFlag = $product->getData('is_deliverable_flag');
                     if ($deliverableFlag === null) {
-                        $deliverableFlag = (bool)$product->getData('is_deliverable');
+                        $deliverableFlag = $product->getData('is_deliverable');
                     }
 
-                    $isDeliverable = (bool)$deliverableFlag;
+                    $isDeliverable = $deliverableFlag === null ? null : (bool)$deliverableFlag;
                     $deliverableLabelData = $product->getData('is_deliverable_label');
                     $deliverableLabel = $deliverableLabelData
                         ? __($deliverableLabelData)
@@ -62,21 +62,42 @@ $productCollection = $block->getLoadedProductCollection();
                     $badgeClasses = $isDeliverable
                         ? 'bg-green-100 text-green-800'
                         : 'bg-yellow-100 text-yellow-800';
+
+                    $itemHtml = $productListItemViewModel->getItemHtml(
+                        $product,
+                        $block,
+                        $viewMode,
+                        $templateType,
+                        $imageDisplayArea,
+                        $showDescription
+                    );
+
+                    $skuAttribute = $escaper->escapeHtmlAttr($product->getSku());
+                    $itemHtml = preg_replace(
+                        '/<li\b([^>]*)>/',
+                        '<li$1 data-product-sku="' . $skuAttribute . '">',
+                        $itemHtml,
+                        1
+                    ) ?? $itemHtml;
+
+                    $badgeHtml = sprintf(
+                        '<span class="mt-3 inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded %1$s">'
+                        . '<span class="w-2 h-2 rounded-full %2$s"></span>%3$s'
+                        . '</span>',
+                        $badgeClasses,
+                        $isDeliverable ? 'bg-green-500' : 'bg-yellow-500',
+                        $escaper->escapeHtml($deliverableLabel)
+                    );
+
+                    $closingLiPosition = strripos($itemHtml, '</li>');
+                    if ($closingLiPosition !== false) {
+                        echo substr($itemHtml, 0, $closingLiPosition)
+                            . $badgeHtml
+                            . substr($itemHtml, $closingLiPosition);
+                    } else {
+                        echo $itemHtml . $badgeHtml;
+                    }
                     ?>
-                    <li class="flex flex-col gap-3" data-product-sku="<?= $escaper->escapeHtmlAttr($product->getSku()) ?>">
-                        <?= $productListItemViewModel->getItemHtml(
-                            $product,
-                            $block,
-                            $viewMode,
-                            $templateType,
-                            $imageDisplayArea,
-                            $showDescription
-                        ); ?>
-                        <span class="inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded <?= $badgeClasses ?>">
-                            <span class="w-2 h-2 rounded-full <?= $isDeliverable ? 'bg-green-500' : 'bg-yellow-500' ?>"></span>
-                            <?= $escaper->escapeHtml($deliverableLabel) ?>
-                        </span>
-                    </li>
                 <?php endforeach; ?>
             </ul>
         </div>

@@ -102,11 +102,11 @@ class ProductPlugin
         }
 
         if (!$normalizedSource) {
-            $this->logger->debug('No source selected; marking product as requestable until a branch is chosen.', [
+            $this->logger->debug('No source selected; defaulting product to deliverable for PDP evaluation.', [
                 'sku' => $sku,
             ]);
-            $this->validatedSkus[$cacheKey] = false;
-            $this->deliverabilityAttribute->apply($subject, false);
+            $this->validatedSkus[$cacheKey] = true;
+            $this->deliverabilityAttribute->apply($subject, true);
             return $result;
         }
 
