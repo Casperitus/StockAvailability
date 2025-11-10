@@ -31,30 +31,40 @@ class ProductCollectionPlugin
 
     public function afterLoad(Collection $subject, Collection $result): Collection
     {
-        $items = $result->getItems();
-        if (!$items) {
+        if ($result->getFlag('stock_availability_processing')) {
             return $result;
         }
 
-        $sourceCode = $this->customerSession->getData('selected_source_code');
-        $sourceCode = $sourceCode ? (string) $sourceCode : null;
+        $result->setFlag('stock_availability_processing', true);
 
-        foreach ($items as $product) {
-            $sku = (string) $product->getSku();
-            $isDeliverable = true;
-
-            if ($sourceCode) {
-                $isDeliverable = $this->stockHelper->isProductDeliverable($sku, $sourceCode);
+        try {
+            $items = $result->getItems();
+            if (!$items) {
+                return $result;
             }
 
-            $this->deliverabilityAttribute->apply($product, $isDeliverable);
+            $sourceCode = $this->customerSession->getData('selected_source_code');
+            $sourceCode = $sourceCode ? (string) $sourceCode : null;
 
-            if (!$isDeliverable) {
-                $product->setIsSalable(false);
-                $this->logger->debug(sprintf('Product %s marked as requestable in collection.', $sku));
+            foreach ($items as $product) {
+                $sku = (string) $product->getSku();
+                $isDeliverable = true;
+
+                if ($sourceCode) {
+                    $isDeliverable = $this->stockHelper->isProductDeliverable($sku, $sourceCode);
+                }
+
+                $this->deliverabilityAttribute->apply($product, $isDeliverable);
+
+                if (!$isDeliverable) {
+                    $product->setIsSalable(false);
+                    $this->logger->debug(sprintf('Product %s marked as requestable in collection.', $sku));
+                }
             }
+
+            return $result;
+        } finally {
+            $result->setFlag('stock_availability_processing', false);
         }
-
-        return $result;
     }
 }
