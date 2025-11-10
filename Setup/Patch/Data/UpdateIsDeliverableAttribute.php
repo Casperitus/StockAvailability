@@ -44,12 +44,12 @@ class UpdateIsDeliverableAttribute implements DataPatchInterface, PatchVersionIn
             }
 
             $fieldsToUpdate = [
-                'is_filterable' => 1,
-                'is_filterable_in_search' => 1,
+                'is_filterable' => 0,
+                'is_filterable_in_search' => 0,
+                'is_filterable_in_grid' => 0,
                 'is_visible_on_front' => 1,
                 'visible_on_front' => 1,
                 'is_used_in_grid' => 1,
-                'is_filterable_in_grid' => 1,
                 'is_visible_in_grid' => 1,
                 'used_in_product_listing' => 1,
                 'searchable' => 1,
