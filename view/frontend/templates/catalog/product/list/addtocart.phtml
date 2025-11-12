@@ -1,0 +1,123 @@
+<?php
+
+/**
+ * Hyvä Themes - https://hyva.io
+ * Copyright © Hyvä Themes 2020-present. All rights reserved.
+ * This product is licensed per Magento install
+ * See https://hyva.io/license
+ */
+
+declare(strict_types=1);
+
+use Hyva\Theme\Model\ViewModelRegistry;
+use Hyva\Theme\ViewModel\HeroiconsOutline;
+use Magento\Catalog\Block\Product\AbstractProduct;
+use Magento\Catalog\Model\Product;
+use Magento\Framework\Escaper;
+use Magento\Framework\View\Element\Template;
+
+/** @var Template|AbstractProduct $block */
+/** @var Escaper $escaper */
+/** @var ViewModelRegistry $viewModels */
+
+/** @var Product|null $product */
+$product = $block->getData('product');
+
+if (!$product instanceof Product || !$product->getId()) {
+    return;
+}
+
+/** @var HeroiconsOutline $heroicons */
+$heroicons = $viewModels->require(HeroiconsOutline::class);
+
+$postParams = $block->getAddToCartPostParams($product);
+$formId = sprintf('product_addtocart_form_%s', $product->getId());
+$addToCartLabel = (string) __('Add to Cart');
+?>
+
+<div
+    class="mt-4"
+    x-data="{
+        sku: '<?= $escaper->escapeJs($product->getSku()) ?>',
+
+        get hasLocation() {
+            const store = Alpine.store('deliverability');
+            return !!(store && store.selected_source_code && store.selected_source_code.length > 0);
+        },
+
+        get isDeliverable() {
+            const store = Alpine.store('deliverability');
+            if (!store || !store.map) {
+                return false;
+            }
+
+            return store.map[this.sku] === 'Yes';
+        },
+
+        init() {
+            DeliverabilityService.registerSku(this.sku);
+        },
+
+        get buttonText() {
+            if (!this.isDeliverable) {
+                return '<?= $escaper->escapeHtml(__('Undeliverable')) ?>';
+            }
+
+            return '<?= $escaper->escapeHtml($addToCartLabel) ?>';
+        }
+    }"
+>
+    <?php if (!$product->isSaleable()): ?>
+        <span class="btn btn-disabled w-full text-center cursor-not-allowed" aria-disabled="true">
+            <?= $escaper->escapeHtml(__('Out of stock')) ?>
+        </span>
+    <?php elseif ($product->getTypeInstance()->hasRequiredOptions($product)): ?>
+        <a
+            class="btn btn-secondary w-full text-center"
+            href="<?= $escaper->escapeUrl($product->getProductUrl()) ?>"
+            title="<?= $escaper->escapeHtmlAttr(__('View Product')) ?>"
+        >
+            <?= $escaper->escapeHtml(__('View Product')) ?>
+        </a>
+    <?php else: ?>
+        <template x-if="!hasLocation">
+            <button
+                type="button"
+                class="btn btn-primary flex items-center gap-2 w-full justify-center"
+                @click="window.toggleDeliveryLocationModal && window.toggleDeliveryLocationModal()"
+            >
+                <?= $heroicons->locationMarkerHtml('border-current'); ?>
+                <span><?= $escaper->escapeHtml(__('Select Location')) ?></span>
+            </button>
+        </template>
+
+        <template x-if="hasLocation">
+            <form
+                data-role="tocart-form"
+                action="<?= $escaper->escapeUrl($postParams['action'] ?? '') ?>"
+                method="post"
+                class="flex"
+                id="<?= $escaper->escapeHtmlAttr($formId) ?>"
+            >
+                <?php foreach ($postParams['data'] ?? [] as $name => $value): ?>
+                    <input type="hidden"
+                        name="<?= $escaper->escapeHtmlAttr($name) ?>"
+                        value="<?= $escaper->escapeHtmlAttr($value) ?>" />
+                <?php endforeach; ?>
+
+                <button
+                    type="submit"
+                    :disabled="!isDeliverable"
+                    :title="buttonText"
+                    class="btn btn-primary flex items-center gap-2 w-full justify-center"
+                    data-addto="cart"
+                >
+                    <span class="icon-wrapper">
+                        <?= $heroicons->shoppingCartHtml('border-current'); ?>
+                    </span>
+                    <span x-text="buttonText"></span>
+                </button>
+            </form>
+        </template>
+    <?php endif; ?>
+</div>
