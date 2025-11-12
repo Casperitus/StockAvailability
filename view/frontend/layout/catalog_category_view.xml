@@ -13,5 +13,11 @@
                 <argument name="template" xsi:type="string">Madar_StockAvailability::product/list.phtml</argument>
             </action>
         </referenceBlock>
+
+        <referenceBlock name="product.info.addtocart">
+            <action method="setTemplate">
+                <argument name="template" xsi:type="string">Madar_StockAvailability::catalog/product/list/addtocart.phtml</argument>
+            </action>
+        </referenceBlock>
     </body>
 </page>
