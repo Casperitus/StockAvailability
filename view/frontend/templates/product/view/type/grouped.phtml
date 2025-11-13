@@ -7,20 +7,26 @@
 
 declare(strict_types=1);
 
+use Hyva\Theme\Model\ViewModelRegistry;
+use Hyva\Theme\ViewModel\ProductStockItem;
 use Magento\Catalog\Block\Product\View\BaseImage;
 use Magento\Catalog\Pricing\Price\TierPrice;
 use Magento\GroupedProduct\Block\Product\View\Type\Grouped;
 use Magento\Framework\Escaper;
 
 /**
- * @var BaseImage|Grouped $block
- * @var Escaper $escaper
+ * @var BaseImage|Grouped   $block
+ * @var Escaper             $escaper
+ * @var ViewModelRegistry   $viewModels
  */
 
 $block->setPreconfiguredValue();
-$product            = $block->getProduct();
-$associatedProducts = $block->getAssociatedProducts();
+$product              = $block->getProduct();
+$associatedProducts   = $block->getAssociatedProducts();
 $hasAssociatedProducts = count($associatedProducts) > 0;
+
+/** @var ProductStockItem $stockItemViewModel */
+$stockItemViewModel = $viewModels->require(ProductStockItem::class);
 ?>
 <script>
     // Collect grouped child SKUs once per page
@@ -92,6 +98,25 @@ $hasAssociatedProducts = count($associatedProducts) > 0;
             <?php
             $itemSku        = $escaper->escapeJs($item->getSku() ?: '');
             $itemIsSaleable = $item->isSaleable() ? 'true' : 'false';
+
+            // --- Per-child qty rules (based on simple product qty template) ---
+            $minSalesQty = $stockItemViewModel->getMinSaleQty($item);
+            $maxSalesQty = $stockItemViewModel->getMaxSaleQty($item);
+            $defaultQty  = (float)($item->getQty() ?: $block->getProductDefaultQty() ?: 0);
+
+            $step = $stockItemViewModel->getQtyIncrements($item)
+                ? $stockItemViewModel->getQtyIncrements($item)
+                : null;
+
+            if ($step) {
+                $minSalesQty = ceil($minSalesQty / $step) * $step;
+                $maxSalesQty = floor($maxSalesQty / $step) * $step;
+                $defaultQty  = ceil($defaultQty / $step) * $step;
+            }
+
+            $isQtyDecimal      = $stockItemViewModel->isQtyDecimal($item);
+            $maxSalesQtyLength = ($maxSalesQty ? strlen((string) $maxSalesQty) : 4)
+                + (int) $isQtyDecimal;
             ?>
             <script>
                 // Push each child SKU into the global array
@@ -133,13 +158,45 @@ $hasAssociatedProducts = count($associatedProducts) > 0;
                         <template x-if="isSaleable && isDeliverable">
                             <div class="control qty">
                                 <input
-                                    type="number"
-                                    min="0"
                                     name="super_group[<?= $escaper->escapeHtmlAttr($item->getId()) ?>]"
                                     id="super_group[<?= $escaper->escapeHtmlAttr($item->getId()) ?>]"
-                                    value="<?= $escaper->escapeHtmlAttr($item->getQty() * 1) ?>"
                                     title="<?= $escaper->escapeHtmlAttr(__('Qty')) ?>"
-                                    class="form-input qty w-full"
+                                    form="product_addtocart_form"
+
+                                    <?php if ($isQtyDecimal): ?>
+                                    type="text"
+                                    pattern="[0-9]+(\.[0-9]{1,<?=
+                                                                /** @noEscape */
+                                                                $maxSalesQtyLength ?>})?"
+                                    inputmode="decimal"
+                                    <?php else: ?>
+                                    type="number"
+                                    pattern="[0-9]{0,<?=
+                                                        /** @noEscape */
+                                                        $maxSalesQtyLength ?>}"
+                                    inputmode="numeric"
+                                    <?php if ($minSalesQty): ?>
+                                    min="<?=
+                                            /** @noEscape */
+                                            $minSalesQty ?>"
+                                    <?php endif; ?>
+                                    <?php if ($maxSalesQty): ?>
+                                    max="<?=
+                                            /** @noEscape */
+                                            $maxSalesQty ?>"
+                                    <?php endif; ?>
+                                    <?php if ($step): ?>
+                                    step="<?=
+                                            /** @noEscape */
+                                            $step ?>"
+                                    <?php endif; ?>
+                                    <?php endif; ?>
+
+                                    value="<?=
+                                            /** @noEscape */
+                                            $defaultQty ?>"
+                                    class="form-input qty w-full text-center invalid:ring-2 invalid:ring-red-500
+                                           <?php /* keep old error styling too */ ?>"
                                     :class="{ 'border-red-500 focus:border-red-500 focus:ring-red-500': !isValid }"
                                     @input.debounce="validateForm()">
                             </div>
