@@ -8,7 +8,7 @@
             </action>
         </referenceBlock>
 
-        <!-- Override grouped options template -->
+        <!--  Override grouped options template  -->
         <referenceBlock name="product.info.options.grouped">
             <action method="setTemplate">
                 <argument name="template" xsi:type="string">Madar_StockAvailability::product/view/type/grouped.phtml</argument>

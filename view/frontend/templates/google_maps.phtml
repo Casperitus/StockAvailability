@@ -55,12 +55,12 @@ if (!$hyvaData || !isset($hyvaData['apiKey']) || empty($hyvaData['apiKey'])) {
             type="button"
             id="delivery-location-button"
             @click="toggleModal"
-            class="group flex items-center rounded p-1 hover:bg-primary/10 outline-offset-2 text-primary text-xs"
+            class="group flex items-center rounded p-1 hover:bg-primary/10 outline-offset-2 text-xs"
             aria-haspopup="dialog"
             :aria-expanded="isModalOpen"
             :disabled="isProcessing">
             <?= $heroiconsOutline->locationMarkerHtml('', 24, 24, ['aria-hidden' => 'true']) ?>
-            <span class="hidden md:inline text-primary mx-1"
+            <span class="hidden md:inline mx-1"
                 x-text="selectedBranchName ? 'Branch: ' + selectedBranchName : '<?= $escaper->escapeHtml(__('Delivery Location')) ?>'">
             </span>
             <!-- Loading indicator -->
@@ -165,7 +165,7 @@ if (!$hyvaData || !isset($hyvaData['apiKey']) || empty($hyvaData['apiKey'])) {
                                             <!-- Edit button -->
                                             <button
                                                 @click.stop="editAddress(address)"
-                                                class="text-primary hover:underline text-sm ml-2"
+                                                class="hover:underline text-sm ml-2"
                                                 :aria-label="'<?= $escaper->escapeJs(__('Edit address')) ?>: ' + address.details">
                                                 <?= $escaper->escapeHtml(__('Edit')) ?>
                                             </button>
