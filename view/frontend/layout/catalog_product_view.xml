@@ -30,8 +30,16 @@
             </block>
         </referenceContainer>
         <!-- Product Avaliabilty -->
-        <referenceContainer name="product.info.additional">
-            <block class="Madar\StockAvailability\Block\GoogleMaps" name="product.store.availability" template="Madar_StockAvailability::product/store-availability.phtml" after="-" />
-        </referenceContainer>
+        <referenceBlock name="product.info.details">
+            <block class="Madar\StockAvailability\Block\GoogleMaps"
+                   name="product.store.availability"
+                   template="Madar_StockAvailability::product/store-availability.phtml"
+                   group="detailed_info"
+                   after="-">
+                <arguments>
+                    <argument name="title" xsi:type="string" translate="true">Store Availability</argument>
+                </arguments>
+            </block>
+        </referenceBlock>
     </body>
 </page>
